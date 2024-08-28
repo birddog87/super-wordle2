@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/super-wordle2/static/css/main.ed6357fa.css",
+    "main.js": "/super-wordle2/static/js/main.1ad4fb9c.js",
+    "index.html": "/super-wordle2/index.html",
+    "main.ed6357fa.css.map": "/super-wordle2/static/css/main.ed6357fa.css.map",
+    "main.1ad4fb9c.js.map": "/super-wordle2/static/js/main.1ad4fb9c.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.ed6357fa.css",
+    "static/js/main.1ad4fb9c.js"
+  ]
+}
