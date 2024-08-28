@@ -1,6 +1,5 @@
 import React from 'react';
-import SuperWordle from './components/super-wordle';
-import './App.css';
+import SuperWordle from './components/SuperWordle';
 
 function App() {
   return (
