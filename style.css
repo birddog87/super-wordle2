@@ -1,0 +1,598 @@
+/* Basic Styling */
+body {
+  background-color: #121213;
+  color: #FFFFFF;
+  font-family: Arial, sans-serif;
+  margin: 0;
+  text-align: center;
+}
+
+.game-container {
+  padding: 20px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 20px;
+}
+
+h1, h2, h3 {
+  margin-bottom: 20px;
+}
+
+#mode-indicator {
+  margin-top: 10px;
+  font-weight: bold;
+  color: #FFFFFF;
+}
+
+/* Mode Selection Buttons */
+.mode-selection {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.mode-selection button {
+  background-color: #3A3A3C;
+  color: #FFFFFF;
+  border: none;
+  padding: 12px 24px;
+  margin: 5px;
+  cursor: pointer;
+  font-size: 1rem;
+  border-radius: 5px;
+  transition: background-color 0.3s;
+}
+
+.mode-selection button:hover {
+  background-color: #5A5A5C;
+}
+
+/* Game Board */
+#game-board {
+  display: grid;
+  grid-template-rows: repeat(6, 1fr);
+  grid-gap: 5px;
+  justify-content: center;
+  margin: 0 auto 20px auto;
+  max-width: 350px;
+}
+
+.board-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  grid-gap: 5px;
+}
+
+.tile {
+  width: 60px;
+  height: 60px;
+  border: 2px solid #3A3A3C;
+  background-color: #121213;
+  color: #FFFFFF;
+  font-size: 2rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Tile Colors */
+.correct {
+  background-color: #538D4E !important;
+  border-color: #538D4E !important;
+  color: #FFFFFF;
+}
+
+.present {
+  background-color: #B59F3B !important;
+  border-color: #B59F3B !important;
+  color: #FFFFFF;
+}
+
+.absent {
+  background-color: #3A3A3C !important;
+  border-color: #3A3A3C !important;
+  color: #FFFFFF;
+}
+
+/* Animations */
+@keyframes flip {
+  0% {
+    transform: rotateX(0deg);
+    background-color: #121213;
+  }
+  50% {
+    transform: rotateX(90deg);
+    background-color: #121213;
+  }
+  100% {
+    transform: rotateX(0deg);
+  }
+}
+
+.tile.flip {
+  animation: flip 0.5s forwards;
+}
+
+.tile.invalid {
+  animation: shake 0.5s;
+}
+
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  20%, 60% {
+    transform: translateX(-10px);
+  }
+  40%, 80% {
+    transform: translateX(10px);
+  }
+}
+
+/* Water filling animation */
+@keyframes fillUp {
+  0% {
+    height: 0;
+  }
+  100% {
+    height: 100%;
+  }
+}
+
+.tile::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  background-color: #538D4E;
+  transition: height 3s ease-out;
+  z-index: -1;
+}
+
+.tile.correct-first-time::after {
+  animation: fillUp 3s forwards;
+}
+
+/* Keyboard */
+#keyboard {
+  margin: 20px auto;
+  max-width: 600px;
+}
+
+.keyboard-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 5px;
+}
+
+#keyboard button {
+  background-color: #818384;
+  color: #FFFFFF;
+  border: none;
+  padding: 15px;
+  margin: 2px;
+  font-size: 1rem;
+  flex: 0 1 40px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background-color 0.3s;
+}
+
+#keyboard button:hover {
+  background-color: #5A5A5C;
+}
+
+#keyboard button.wide-button {
+  flex: 0 1 60px;
+}
+
+.key-correct {
+  background-color: #538D4E !important; /* Green */
+}
+
+.key-present {
+  background-color: #B59F3B !important; /* Yellow */
+}
+
+.key-absent {
+  background-color: #3A3A3C !important; /* Grey */
+}
+
+/* Statistics */
+#statistics {
+  margin: 40px auto;
+  max-width: 600px;
+}
+
+#statistics h2 {
+  margin-bottom: 20px;
+}
+
+#streak-counter {
+  font-size: 1.2rem;
+  margin-bottom: 10px;
+}
+
+/* Modal Styles */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0, 0, 0, 0.8);
+}
+
+.modal-content {
+  background-color: #1A1A1B;
+  margin: 5% auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 90%;
+  max-width: 500px;
+  position: relative;
+  border-radius: 10px;
+}
+
+.modal-content h2 {
+  margin-top: 0;
+}
+
+.modal-content .close {
+  color: #FFFFFF;
+  position: absolute;
+  right: 15px;
+  top: 15px;
+  font-size: 28px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.modal-content .close:hover,
+.modal-content .close:focus {
+  color: #AAAAAA;
+}
+
+.modal-content label {
+  display: block;
+  margin-top: 10px;
+  text-align: left;
+}
+
+.modal-content input[type="text"],
+.modal-content input[type="email"],
+.modal-content input[type="password"],
+.modal-content textarea {
+  width: 90%;
+  padding: 10px;
+  margin: 10px 0;
+  font-size: 1rem;
+  border: 1px solid #555;
+  border-radius: 5px;
+}
+
+.modal-content button {
+  background-color: #3A3A3C;
+  color: #FFFFFF;
+  border: none;
+  padding: 10px 20px;
+  margin-top: 10px;
+  cursor: pointer;
+  font-size: 1rem;
+  border-radius: 5px;
+  transition: background-color 0.3s;
+}
+
+.modal-content button:hover {
+  background-color: #5A5A5C;
+}
+
+textarea {
+  resize: vertical;
+  height: 100px;
+}
+
+/* Winning Modal */
+#winning-modal .modal-content {
+  background-color: #1A1A1B;
+  border: 1px solid #888;
+  padding: 20px;
+  border-radius: 10px;
+  position: relative;
+}
+
+#confetti-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+#word-definition {
+  margin-top: 20px;
+  font-size: 1.1rem;
+  color: #FFFFFF;
+}
+
+#share-button,
+#close-winning-modal,
+#share-whatsapp-button {
+  background-color: #3A3A3C;
+  color: #FFFFFF;
+  border: none;
+  padding: 12px 24px;
+  margin: 10px 5px 0 5px;
+  cursor: pointer;
+  font-size: 1rem;
+  border-radius: 5px;
+  transition: background-color 0.3s;
+}
+
+#share-button:hover,
+#close-winning-modal:hover,
+#share-whatsapp-button:hover {
+  background-color: #5A5A5C;
+}
+
+/* Feedback Modal */
+#feedback-modal .modal-content {
+  background-color: #1A1A1B;
+  border: 1px solid #888;
+  padding: 20px;
+  border-radius: 10px;
+}
+
+/* Authentication Modals */
+#auth-modal .modal-content,
+#email-auth-modal .modal-content {
+  background-color: #1A1A1B;
+  border: 1px solid #888;
+  padding: 20px;
+  border-radius: 10px;
+}
+
+#auth-modal button,
+#email-auth-modal button {
+  width: 100%;
+  margin: 10px 0;
+}
+
+#achievements-modal .modal-content {
+  background-color: #1A1A1B;
+  border: 1px solid #888;
+  padding: 20px;
+  border-radius: 10px;
+}
+
+#achievements-list {
+  text-align: left;
+}
+
+#profile-modal .modal-content {
+  background-color: #1A1A1B;
+  border: 1px solid #888;
+  padding: 20px;
+  border-radius: 10px;
+}
+
+#profile-name {
+  font-size: 1.2rem;
+  margin-bottom: 20px;
+}
+
+/* Leaderboards */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+th, td {
+  padding: 10px;
+  text-align: left;
+  border-bottom: 1px solid #3A3A3C;
+}
+
+th {
+  background-color: #2A2A2A;
+  font-weight: bold;
+}
+
+tr:nth-child(even) {
+  background-color: #1E1E1E;
+}
+
+/* Responsive Design */
+@media (max-width: 600px) {
+  .tile {
+    width: 40px;
+    height: 40px;
+    font-size: 1.5rem;
+  }
+
+  #keyboard button {
+    padding: 10px;
+    font-size: 0.8rem;
+    flex: 0 1 30px;
+  }
+
+  #keyboard button.wide-button {
+    flex: 0 1 50px;
+  }
+
+  .mode-selection button {
+    padding: 8px 16px;
+    font-size: 0.9rem;
+  }
+
+  /* Responsive table for mobile */
+  table, thead, tbody, th, td, tr {
+    display: block;
+  }
+
+  thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+
+  tr {
+    margin-bottom: 15px;
+    border: 1px solid #3A3A3C;
+  }
+
+  td {
+    border: none;
+    position: relative;
+    padding-left: 50%;
+    text-align: right;
+  }
+
+  td:before {
+    content: attr(data-label);
+    position: absolute;
+    left: 6px;
+    width: 45%;
+    padding-right: 10px;
+    white-space: nowrap;
+    text-align: left;
+    font-weight: bold;
+  }
+}
+
+.settings {
+  display: flex;
+  justify-content: center;
+  margin: 20px 0;
+}
+
+.settings button {
+  background-color: #3A3A3C;
+  color: #FFFFFF;
+  border: none;
+  padding: 10px 15px;
+  margin: 0 5px;
+  cursor: pointer;
+  font-size: 1rem;
+  border-radius: 5px;
+  transition: background-color 0.3s;
+}
+
+.settings button:hover {
+  background-color: #5A5A5C;
+}
+
+/* Tabs in Leaderboard Modal */
+.tabs {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
+.tablink {
+  background-color: #3A3A3C;
+  color: #FFFFFF;
+  padding: 10px 15px;
+  cursor: pointer;
+  border: none;
+  margin: 0 5px;
+  font-size: 1rem;
+  border-radius: 5px 5px 0 0;
+}
+
+.tablink.active {
+  background-color: #5A5A5C;
+}
+
+.tablink:hover {
+  background-color: #5A5A5C;
+}
+
+.tabcontent {
+  display: none;
+}
+
+.tabcontent.active {
+  display: block;
+}
+
+/* Login/Logout Button Styles */
+#login-button,
+#logout-button {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 16px;
+  margin: 4px 2px;
+  transition-duration: 0.4s;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+#login-button:hover,
+#logout-button:hover {
+  background-color: #45a049;
+}
+
+/* User Display Container */
+.user-display-container {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+#user-display {
+  margin-right: 10px;
+}
+
+/* Responsive adjustments for header */
+@media (max-width: 600px) {
+  header {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .user-display-container {
+    margin-top: 10px;
+  }
+}
+
+/* New Styles for Modal Close Button and Buttons Inside Modal */
+
+/* Style for the dynamically added "Close" button in Daily Attempt Modal */
+.modal-button {
+    background-color: #538D4E;
+    color: #FFFFFF;
+    border: none;
+    padding: 10px 20px;
+    margin-top: 15px;
+    cursor: pointer;
+    font-size: 1rem;
+    border-radius: 5px;
+    transition: background-color 0.3s;
+}
+
+.modal-button:hover {
+    background-color: #6fae6f;
+}

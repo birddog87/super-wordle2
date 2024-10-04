@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wordle Upgrade</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+    <div class="game-container">
+        <header>
+            <h1>Wordle Upgrade</h1>
+            <div class="user-display-container">
+                <span id="user-display">Not logged in</span>
+                <button id="login-button">Login</button>
+                <button id="logout-button" style="display: none;">Logout</button>
+            </div>
+        </header>
+
+        <div id="mode-indicator">Current Mode: Daily</div>
+
+        <div class="mode-selection">
+            <button id="daily-mode-button">Word of the Day</button>
+            <button id="random-mode-button">Random Word</button>
+            <button id="six-letter-mode-button">6-Letter Word</button>
+            <button id="view-leaderboard">View Leaderboard</button>
+            <button id="view-achievements">View Achievements</button>
+            <button id="open-feedback">Feedback</button>
+        </div>
+
+        <main role="main">
+            <div id="game-board"></div>
+            <div id="keyboard"></div>
+            <div id="statistics">
+                <h2>Your Statistics</h2>
+                <div id="streak-counter">Current Streak: 0</div>
+                <canvas id="stats-chart"></canvas>
+            </div>
+        </main>
+    </div>
+
+    <!-- Name Modal -->
+    <div id="name-modal" class="modal" aria-hidden="true">
+        <div class="modal-content" role="dialog" aria-labelledby="name-modal-title">
+            <span id="name-modal-close" class="close" aria-label="Close">&times;</span>
+            <h2 id="name-modal-title">Enter Your Name</h2>
+            <input type="text" id="player-name-input" placeholder="Player Name">
+            <button id="save-name-button">Save</button>
+        </div>
+    </div>
+
+    <!-- Leaderboard Modal -->
+    <div id="leaderboard-modal" class="modal" aria-hidden="true">
+        <div class="modal-content" role="dialog" aria-labelledby="leaderboard-modal-title">
+            <span id="leaderboard-modal-close" class="close" aria-label="Close">&times;</span>
+            <h2 id="leaderboard-modal-title">Leaderboard</h2>
+            <div class="tabs">
+                <button class="tablink active" data-tab="leaderboard-daily">Daily Word</button>
+                <button class="tablink" data-tab="leaderboard-random">Random Word</button>
+                <button class="tablink" data-tab="leaderboard-six-letter">6-Letter Word</button>
+            </div>
+            <input type="date" id="leaderboard-date">
+            <div id="leaderboard-daily" class="tabcontent active"></div>
+            <div id="leaderboard-random" class="tabcontent"></div>
+            <div id="leaderboard-six-letter" class="tabcontent"></div>
+        </div>
+    </div>
+
+    <!-- Daily Attempt Modal -->
+    <div id="daily-attempt-modal" class="modal" aria-hidden="true">
+        <div class="modal-content" role="dialog" aria-labelledby="daily-attempt-modal-title">
+            <span id="daily-attempt-modal-close" class="close" aria-label="Close">&times;</span>
+            <h2 id="daily-attempt-modal-title">Daily Word Already Attempted</h2>
+            <div id="daily-attempt-content"></div>
+        </div>
+    </div>
+
+    <!-- Feedback Modal -->
+    <div id="feedback-modal" class="modal" aria-hidden="true">
+        <div class="modal-content" role="dialog" aria-labelledby="feedback-modal-title">
+            <span id="feedback-modal-close" class="close" aria-label="Close">&times;</span>
+            <h2 id="feedback-modal-title">Feedback</h2>
+            <textarea id="feedback-text" placeholder="Enter your feedback here"></textarea>
+            <button id="submit-feedback">Submit</button>
+        </div>
+    </div>
+
+    <!-- Winning Modal -->
+    <div id="winning-modal" class="modal" aria-hidden="true">
+        <div class="modal-content" role="dialog" aria-labelledby="winning-modal-title">
+            <span id="close-winning-modal" class="close" aria-label="Close">&times;</span>
+            <h2 id="winning-modal-title">Congratulations!</h2>
+            <h3 id="winning-word-display"></h3>
+            <div id="word-definition"></div>
+            <div class="share-buttons">
+                <button id="share-whatsapp-button">Share on WhatsApp</button>
+                <button id="share-button">Share on Twitter</button>
+            </div>
+            <canvas id="confetti-canvas"></canvas>
+        </div>
+    </div>
+
+    <!-- Authentication Modal -->
+    <div id="auth-modal" class="modal" aria-hidden="true">
+        <div class="modal-content" role="dialog" aria-labelledby="auth-modal-title">
+            <span id="auth-modal-close" class="close" aria-label="Close">&times;</span>
+            <h2 id="auth-modal-title">Login / Sign Up</h2>
+            <button id="email-signin-button">Sign in with Email</button>
+            <button id="email-signup-button">Sign up with Email</button>
+        </div>
+    </div>
+
+    <!-- Email Authentication Modal -->
+    <div id="email-auth-modal" class="modal" aria-hidden="true">
+        <div class="modal-content" role="dialog" aria-labelledby="email-auth-modal-title">
+            <span id="email-auth-modal-close" class="close" aria-label="Close">&times;</span>
+            <h2 id="email-auth-modal-title">Email Authentication</h2>
+            <input type="email" id="user-email" placeholder="Email">
+            <input type="password" id="user-password" placeholder="Password">
+            <button id="email-signin-submit-button">Sign In</button>
+            <button id="email-signup-submit-button">Sign Up</button>
+        </div>
+    </div>
+
+    <!-- Achievements Modal -->
+    <div id="achievements-modal" class="modal" aria-hidden="true">
+        <div class="modal-content" role="dialog" aria-labelledby="achievements-modal-title">
+            <span id="achievements-modal-close" class="close" aria-label="Close">&times;</span>
+            <h2 id="achievements-modal-title">Achievements</h2>
+            <ul id="achievements-list"></ul>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
