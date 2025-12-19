@@ -1,8 +1,5 @@
 import { format } from 'date-fns';
-
-// This is a simplified word list. In a real application, you'd have a much larger list.
-const wordList5 = ['REACT', 'QUERY', 'STATE', 'PROPS', 'HOOKS'];
-const wordList6 = ['WORDLE', 'CODING', 'GITHUB', 'TAILWIND', 'FRAMER'];
+import { wordList5, wordList6, validWords5, validWords6 } from '../../utils/wordLists';
 
 export const generateRandomWord = (length) => {
   const list = length === 5 ? wordList5 : wordList6;
@@ -16,11 +13,16 @@ export const generateDailyWord = (length) => {
   return list[index];
 };
 
+export const isValidWord = (word, length) => {
+  const validSet = length === 5 ? validWords5 : validWords6;
+  return validSet.has(word.toUpperCase());
+};
+
 export const checkGuess = (guess, targetWord) => {
   const result = Array(guess.length).fill('absent');
   const targetLetters = targetWord.split('');
 
-  // Check for correct letters
+  // Check for correct letters first
   for (let i = 0; i < guess.length; i++) {
     if (guess[i] === targetWord[i]) {
       result[i] = 'correct';

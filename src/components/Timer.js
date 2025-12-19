@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { format } from 'date-fns';
 
-const Timer = ({ gameState }) => {
+const Timer = ({ gameState, darkMode }) => {
   const [time, setTime] = useState(0);
 
   useEffect(() => {
@@ -11,14 +10,32 @@ const Timer = ({ gameState }) => {
         setTime((prevTime) => prevTime + 1);
       }, 1000);
     } else {
+      if (gameState === 'won' || gameState === 'lost') {
+        // Keep the final time displayed
+      } else {
+        setTime(0);
+      }
       clearInterval(interval);
     }
     return () => clearInterval(interval);
   }, [gameState]);
 
+  useEffect(() => {
+    if (gameState === 'playing') {
+      setTime(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   return (
-    <div className="text-xl font-bold mb-4">
-      Time: {format(new Date(time * 1000), 'mm:ss')}
+    <div className={`text-center mb-4 font-mono text-lg ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+      ⏱️ {formatTime(time)}
     </div>
   );
 };

@@ -1,29 +1,27 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const Modal = ({ show, onClose, children }) => {
+const Modal = ({ show, onClose, children, darkMode }) => {
   return (
     <AnimatePresence>
       {show && (
         <motion.div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          onClick={onClose}
         >
           <motion.div
-            className="bg-white p-8 rounded-lg max-w-md w-full"
-            initial={{ y: -50, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -50, opacity: 0 }}
+            className={`p-6 rounded-lg max-w-md w-full ${
+              darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'
+            }`}
+            initial={{ y: -50, opacity: 0, scale: 0.9 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: -50, opacity: 0, scale: 0.9 }}
+            onClick={(e) => e.stopPropagation()}
           >
             {children}
-            <button
-              onClick={onClose}
-              className="mt-4 px-4 py-2 bg-blue-500 text-white rounded"
-            >
-              Close
-            </button>
           </motion.div>
         </motion.div>
       )}
