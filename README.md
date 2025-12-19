@@ -1,70 +1,165 @@
-# Getting Started with Create React App
+# SuperWordle 🎮
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A beautiful, feature-rich Wordle game built with React! Play with 5 or 6 letter words in daily or random modes.
 
-## Available Scripts
+## ✨ Features
 
-In the project directory, you can run:
+- **Multiple Game Modes**
+  - Daily Word: New word every day
+  - Random Word: Endless gameplay with random words
 
-### `npm start`
+- **Word Length Options**
+  - 5-letter words
+  - 6-letter words
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+- **Rich Word Lists**
+  - 500+ words for 5-letter mode
+  - 500+ words for 6-letter mode
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- **Beautiful UI/UX**
+  - Smooth tile flip animations
+  - Color-coded feedback (green/yellow/gray)
+  - Keyboard color highlighting
+  - Dark mode toggle with persistence
+  - Responsive design for all devices
 
-### `npm test`
+- **Game Features**
+  - Word validation against dictionary
+  - Timer to track your speed
+  - Statistics tracking (games played, win %, streaks)
+  - Guess distribution chart
+  - Share results feature
+  - Local storage for progress persistence
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## 🚀 Live Demo
 
-### `npm run build`
+**Public URL:** https://birddog87.github.io/super-wordle2/
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+> Note: The game will be automatically deployed to GitHub Pages when changes are merged to the main branch.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## 🎮 How to Play
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+1. Guess the word in 6 tries
+2. Each guess must be a valid word
+3. Press Enter to submit your guess
+4. After each guess, tiles change color:
+   - 🟩 **Green**: Letter is correct and in the right spot
+   - 🟨 **Yellow**: Letter is in the word but wrong spot
+   - ⬜ **Gray**: Letter is not in the word
 
-### `npm run eject`
+## 🛠️ Development
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### Prerequisites
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+- Node.js 18+
+- npm or yarn
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+### Installation
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```bash
+# Install dependencies
+npm install
 
-## Learn More
+# Start development server
+npm start
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+# Build for production
+npm run build
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+# Deploy to GitHub Pages
+npm run deploy
+```
 
-### Code Splitting
+### Tech Stack
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+- **React 18** - UI framework
+- **Framer Motion** - Animations
+- **date-fns** - Date utilities
+- **Tailwind CSS** - Styling
+- **React Scripts** - Build tooling
 
-### Analyzing the Bundle Size
+## 📁 Project Structure
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+```
+src/
+├── components/
+│   ├── SuperWordle.js      # Main game component
+│   ├── GameBoard.js        # Game board with tiles
+│   ├── Keyboard.js         # On-screen keyboard
+│   ├── Timer.js            # Game timer
+│   ├── Statistics.js       # Stats display
+│   ├── Modal.js            # Modal component
+│   └── utils/
+│       └── gameLogic.js    # Game logic functions
+├── utils/
+│   └── wordLists.js        # Comprehensive word lists
+├── App.js                  # App wrapper
+└── index.js                # Entry point
+```
 
-### Making a Progressive Web App
+## 🎨 Features in Detail
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+### Dark Mode
+Toggle between light and dark themes. Your preference is saved automatically.
 
-### Advanced Configuration
+### Statistics
+Track your performance with:
+- Games played
+- Win percentage
+- Current streak
+- Maximum streak
+- Guess distribution chart
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+### Share Results
+Share your results as emoji grids (like the original Wordle):
+```
+SuperWordle 4/6
 
-### Deployment
+⬜🟨⬜🟨⬜
+⬜🟩🟩⬜⬜
+🟩🟩🟩⬜🟩
+🟩🟩🟩🟩🟩
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+## 🚀 Deployment
 
-### `npm run build` fails to minify
+The project is configured for automatic deployment to GitHub Pages using GitHub Actions.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+### Manual Deployment
+
+```bash
+npm run deploy
+```
+
+### Automatic Deployment
+
+Push to the `main` branch to trigger automatic deployment via GitHub Actions.
+
+## 📝 Recent Updates
+
+- ✅ Added comprehensive word lists (500+ words each)
+- ✅ Implemented proper tile color coding with animations
+- ✅ Added keyboard color feedback
+- ✅ Implemented word validation
+- ✅ Added statistics tracking with localStorage
+- ✅ Implemented dark mode with persistence
+- ✅ Enhanced UI/UX with better styling
+- ✅ Added timer functionality
+- ✅ Implemented share results feature
+- ✅ Updated to Node 18 and latest dependencies
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to open issues or submit pull requests.
+
+## 📄 License
+
+This project is open source and available under the MIT License.
+
+## 🙏 Acknowledgments
+
+Inspired by the original Wordle game by Josh Wardle.
+
+---
+
+**Enjoy playing SuperWordle!** 🎉
