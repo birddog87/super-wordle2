@@ -1,58 +1,55 @@
-const CACHE_NAME = 'wordle-upgrade-cache-v2'; // Updated cache version
-const urlsToCache = [
-  '/',
-  '/index.html',
-  '/style.css',
-  '/script.js',
-  '/words_en.txt',
-  '/icons/apple-touch-icon.png',
-  '/icons/favicon-32x32.png',
-  '/icons/favicon-16x16.png',
-  '/manifest.json',
-  '/pop-sound.mp3', // Ensure this path is correct
-  // Add other assets like images, icons, etc.
+const CACHE_NAME = 'wordle-upgrade-cache-v3';
+const ASSETS = [
+  './',
+  'index.html',
+  'style.css',
+  'script.js',
+  'words_en.txt',
+  'manifest.json',
+  'pop-sound.mp3',
 ];
 
-// Install the service worker and cache assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
-      })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
   );
 });
 
-// Fetch assets from cache or network
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((names) =>
+      Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
+    ).then(() => self.clients.claim())
+  );
+});
+
 self.addEventListener('fetch', (event) => {
-  if (event.request.url.includes('api.dictionaryapi.dev')) {
-    // Don't cache API responses
+  const req = event.request;
+  if (req.method !== 'GET') return;
+
+  const url = new URL(req.url);
+  if (url.hostname === 'api.dictionaryapi.dev' ||
+      url.hostname.includes('firebaseio.com') ||
+      url.hostname.includes('googleapis.com') ||
+      url.hostname.includes('gstatic.com')) {
     return;
   }
-  event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        if (response) {
-          return response; // Return from cache
-        }
-        return fetch(event.request); // Fetch from network
-      })
-  );
-});
 
-// Update the service worker
-self.addEventListener('activate', (event) => {
-  const cacheWhitelist = [CACHE_NAME];
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (!cacheWhitelist.includes(cacheName)) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
+  event.respondWith(
+    caches.match(req).then((cached) => {
+      if (cached) {
+        fetch(req).then((res) => {
+          if (res && res.ok) caches.open(CACHE_NAME).then((c) => c.put(req, res.clone()));
+        }).catch(() => {});
+        return cached;
+      }
+      return fetch(req).then((res) => {
+        if (res && res.ok && url.origin === self.location.origin) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(req, clone));
+        }
+        return res;
+      }).catch(() => cached);
     })
   );
 });

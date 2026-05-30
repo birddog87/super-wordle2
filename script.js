@@ -1,1064 +1,902 @@
-(function() {
-  // Initialize Firebase (Using your Firebase project's configuration)
-  const firebaseConfig = {
-    apiKey: "AIzaSyApXW3PWhqhQ0mXeIG1oo5mdawQD29Xxjs",
-    authDomain: "wordle-upgrade-c055f.firebaseapp.com",
-    databaseURL: "https://wordle-upgrade-c055f-default-rtdb.firebaseio.com",
-    projectId: "wordle-upgrade-c055f",
-    appId: "1:683362789332:web:e3aeb537a5f96773e85841",
+(function () {
+  'use strict';
+
+  const CONFIG = {
+    MAX_GUESSES: 6,
+    DEFAULT_LENGTH: 5,
+    SIX_LETTER_LENGTH: 6,
+    FLIP_STEP_MS: 300,
+    FLIP_DURATION_MS: 500,
+    SHAKE_MS: 500,
+    CONFETTI_MS: 5000,
+    TOAST_MS: 2500,
+    MODES: { DAILY: 'daily', RANDOM: 'random', SIX: 'six-letter' },
+    FIREBASE: {
+      apiKey: 'AIzaSyApXW3PWhqhQ0mXeIG1oo5mdawQD29Xxjs',
+      authDomain: 'wordle-upgrade-c055f.firebaseapp.com',
+      databaseURL: 'https://wordle-upgrade-c055f-default-rtdb.firebaseio.com',
+      projectId: 'wordle-upgrade-c055f',
+      appId: '1:683362789332:web:e3aeb537a5f96773e85841',
+    },
   };
-  // Initialize Firebase
-  firebase.initializeApp(firebaseConfig);
-  var database = firebase.database();
-  var auth = firebase.auth();
 
-  // Variables to store game state
-  let targetWord = '';
-  let currentGuess = '';
-  let guesses = [];
-  let maxGuesses = 6;
-  let wordLength = 5;
-  let gameActive = false;
-  let startTime;
-  let playerName = '';
-  let validWordsSet = new Set();
-  let currentMode = 'daily';
-  let correctPositions = []; // Track correct positions for animations
+  firebase.initializeApp(CONFIG.FIREBASE);
+  const database = firebase.database();
+  const auth = firebase.auth();
 
-  // User ID for Firebase (after authentication)
-  let userId = null;
+  const state = {
+    targetWord: '',
+    currentGuess: '',
+    guesses: [],
+    wordLength: CONFIG.DEFAULT_LENGTH,
+    gameActive: false,
+    startTime: null,
+    playerName: '',
+    validWordsSet: new Set(),
+    wordsByLength: new Map(),
+    currentMode: CONFIG.MODES.DAILY,
+    correctPositions: [],
+    userId: null,
+    currentStreak: 0,
+    wordListPromise: null,
+    leaderboardTabsBound: false,
+    animating: false,
+    statsChart: null,
+  };
 
-  // Streak Counter
-  let currentStreak = 0;
+  const $ = (id) => document.getElementById(id);
+  const $$ = (sel) => document.querySelectorAll(sel);
 
-  // Load word list
-  async function loadWordList() {
-    try {
-      const response = await fetch('words_en.txt');
-      if (!response.ok) {
-        throw new Error('Failed to load word list');
-      }
-      const text = await response.text();
-      const wordsArray = text
-        .split('\n')
-        .map(word => word.trim().toLowerCase())
-        .filter(word => word.length > 0);
-      validWordsSet = new Set(wordsArray);
-      console.log('Word list loaded');
-    } catch (error) {
-      console.error('Error loading word list:', error);
-    }
+  function todayISO() {
+    return new Date().toLocaleDateString('en-CA');
   }
 
-  // Function to update the mode indicator
+  function sanitize(str) {
+    const t = document.createElement('div');
+    t.textContent = String(str ?? '');
+    return t.innerHTML;
+  }
+
+  function loadWordList() {
+    if (state.wordListPromise) return state.wordListPromise;
+    state.wordListPromise = fetch('words_en.txt')
+      .then((r) => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      })
+      .then((text) => {
+        const words = text
+          .split(/\r?\n/)
+          .map((w) => w.trim().toLowerCase())
+          .filter((w) => /^[a-z]+$/.test(w));
+        state.validWordsSet = new Set(words);
+        const byLen = new Map();
+        for (const w of words) {
+          if (!byLen.has(w.length)) byLen.set(w.length, []);
+          byLen.get(w.length).push(w);
+        }
+        state.wordsByLength = byLen;
+      })
+      .catch((err) => {
+        console.error('Word list load failed:', err);
+        toast('Could not load word list. Try refreshing.', 'error');
+        state.wordListPromise = null;
+        throw err;
+      });
+    return state.wordListPromise;
+  }
+
+  function getRandomWord(length) {
+    const list = state.wordsByLength.get(length);
+    if (!list || !list.length) return null;
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  function getDailyWord() {
+    const list = state.wordsByLength.get(CONFIG.DEFAULT_LENGTH);
+    if (!list || !list.length) return null;
+    const d = new Date();
+    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    return list[seed % list.length];
+  }
+
+  function openModal(id) {
+    const m = $(id);
+    if (!m) return;
+    m.classList.add('open');
+    m.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeModal(idOrEl) {
+    const m = typeof idOrEl === 'string' ? $(idOrEl) : idOrEl;
+    if (!m) return;
+    m.classList.remove('open');
+    m.setAttribute('aria-hidden', 'true');
+  }
+
+  function anyModalOpen() {
+    return document.querySelector('.modal.open') !== null;
+  }
+
+  function toast(message, type = 'info', duration = CONFIG.TOAST_MS) {
+    let container = $('toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toast-container';
+      container.setAttribute('role', 'status');
+      container.setAttribute('aria-live', 'polite');
+      document.body.appendChild(container);
+    }
+    const t = document.createElement('div');
+    t.className = `toast toast-${type}`;
+    t.textContent = message;
+    container.appendChild(t);
+    requestAnimationFrame(() => t.classList.add('show'));
+    setTimeout(() => {
+      t.classList.remove('show');
+      setTimeout(() => t.remove(), 250);
+    }, duration);
+  }
+
   function updateModeIndicator(mode) {
-    const modeIndicator = document.getElementById('mode-indicator');
-    modeIndicator.textContent = `Current Mode: ${mode.charAt(0).toUpperCase() + mode.slice(1)}`;
-    console.log('Mode updated:', mode);
+    const label = mode === CONFIG.MODES.SIX ? '6-Letter' : mode.charAt(0).toUpperCase() + mode.slice(1);
+    $('mode-indicator').textContent = `Current Mode: ${label}`;
   }
 
-  // Event listeners for mode buttons
-  document.getElementById('daily-mode-button').addEventListener('click', () => startGame('daily'));
-  document.getElementById('random-mode-button').addEventListener('click', () => startGame('random'));
-  document.getElementById('six-letter-mode-button').addEventListener('click', () => startGame('six-letter'));
-
-  // Start the game based on mode
   async function startGame(mode) {
-    console.log('Starting game in mode:', mode);
-    await loadWordList();
-
-    if (mode === 'daily') {
-      const today = new Date().toLocaleDateString('en-CA');
-      const dailyAttempted = localStorage.getItem('dailyAttempted');
-
-      if (dailyAttempted === today) {
-        // Instead of alert, display the daily-attempt-modal
-        const dailyAttemptModal = document.getElementById('daily-attempt-modal');
-        const dailyAttemptContent = document.getElementById('daily-attempt-content');
-        dailyAttemptContent.innerHTML = `
-          <p>You've already attempted today's word. Please try again tomorrow!</p>
-          <p>The word of the day was: <strong>${targetWord.toUpperCase()}</strong></p>
-          <button id="view-today-word-button">View Today's Word</button>
-        `;
-
-        // Optionally, add an event listener to the new button
-        document.getElementById('view-today-word-button').addEventListener('click', () => {
-          // Implement functionality to view today's word or related features
-        });
-        dailyAttemptModal.style.display = 'block';
-        dailyAttemptModal.setAttribute('aria-hidden', 'false');
-        return; // Exit the function to prevent starting a new game
-      }
+    try {
+      await loadWordList();
+    } catch {
+      return;
     }
 
-    gameActive = true;
-    currentGuess = '';
-    guesses = [];
-    startTime = new Date();
-    currentMode = mode;
-    correctPositions = new Array(wordLength).fill(false); // Reset correct positions
+    if (mode === CONFIG.MODES.DAILY && localStorage.getItem('dailyAttempted') === todayISO()) {
+      showDailyAttemptedModal();
+      return;
+    }
+
+    state.currentMode = mode;
+    state.wordLength = mode === CONFIG.MODES.SIX ? CONFIG.SIX_LETTER_LENGTH : CONFIG.DEFAULT_LENGTH;
+    state.targetWord = mode === CONFIG.MODES.DAILY ? getDailyWord() : getRandomWord(state.wordLength);
+
+    if (!state.targetWord) {
+      toast('No words available for this mode.', 'error');
+      return;
+    }
+
+    state.currentGuess = '';
+    state.guesses = [];
+    state.startTime = Date.now();
+    state.correctPositions = new Array(state.wordLength).fill(false);
+    state.gameActive = true;
+    state.animating = false;
 
     updateModeIndicator(mode);
-
-    getPlayerName();
-
-    // Set word length and target word based on mode
-    if (mode === 'daily') {
-      wordLength = 5;
-      targetWord = getDailyWord();
-    } else if (mode === 'random') {
-      wordLength = 5;
-      targetWord = getRandomWord(wordLength);
-    } else if (mode === 'six-letter') {
-      wordLength = 6;
-      targetWord = getRandomWord(wordLength);
-    }
-
-    console.log('Target word:', targetWord);
-
-    maxGuesses = 6;
-
-    // Reset the game board and keyboard
+    ensurePlayerName();
     createBoard();
     createKeyboard();
     updateBoard();
   }
 
-  // Function to get a random word
-  function getRandomWord(length) {
-    const filteredWords = Array.from(validWordsSet).filter(word => word.length === length);
-    return filteredWords[Math.floor(Math.random() * filteredWords.length)];
-  }
-
-  // Function to get the daily word
-  function getDailyWord() {
-    const today = new Date();
-    const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-    const filteredWords = Array.from(validWordsSet).filter(word => word.length === 5);
-    return filteredWords[seed % filteredWords.length];
-  }
-
-  // Get player's name from Firebase or prompt for it
-  function getPlayerName() {
-    if (userId) {
-      database.ref(`users/${userId}/profile/name`).once('value').then(snapshot => {
-        playerName = snapshot.val() || '';
-        if (!playerName) {
-          showNameModal();
-        }
+  function ensurePlayerName() {
+    if (state.userId) {
+      database.ref(`users/${state.userId}/profile/name`).once('value').then((snap) => {
+        state.playerName = snap.val() || '';
+        if (!state.playerName) showNameModal();
         updateUserDisplay();
       });
     } else {
-      // If not authenticated, use localStorage
-      playerName = localStorage.getItem('playerName') || '';
-      if (!playerName) {
-        showNameModal();
-      }
+      state.playerName = localStorage.getItem('playerName') || '';
+      if (!state.playerName) showNameModal();
       updateUserDisplay();
     }
   }
 
-  // Show name entry modal
   function showNameModal() {
-    const nameModal = document.getElementById('name-modal');
-    nameModal.style.display = 'block';
-    nameModal.setAttribute('aria-hidden', 'false');
-
-    // Automatically focus the input field when the modal opens
-    const playerNameInput = document.getElementById('player-name-input');
-    playerNameInput.focus();
-
-    document.getElementById('save-name-button').onclick = function () {
-      const nameInput = playerNameInput;
-      if (nameInput.value.trim()) {
-        playerName = sanitizeHTML(nameInput.value.trim());
-        if (userId) {
-          // Save to Firebase
-          database.ref(`users/${userId}/profile`).update({
-            name: playerName
-          });
-        } else {
-          // Save to localStorage
-          localStorage.setItem('playerName', playerName);
-        }
-        nameModal.style.display = 'none';
-        nameModal.setAttribute('aria-hidden', 'true');
-        updateUserDisplay();
-      } else {
-        alert('Please enter your name.');
-      }
-    };
+    openModal('name-modal');
+    $('player-name-input').focus();
   }
 
-  // Create game board
+  function saveName() {
+    const input = $('player-name-input');
+    const value = input.value.trim();
+    if (!value) {
+      toast('Please enter a name.', 'error');
+      input.focus();
+      return;
+    }
+    state.playerName = sanitize(value);
+    if (state.userId) {
+      database.ref(`users/${state.userId}/profile`).update({ name: state.playerName });
+    } else {
+      localStorage.setItem('playerName', state.playerName);
+    }
+    closeModal('name-modal');
+    updateUserDisplay();
+  }
+
   function createBoard() {
-    const gameBoard = document.getElementById('game-board');
-    gameBoard.innerHTML = '';
-
-    for (let i = 0; i < maxGuesses; i++) {
+    const board = $('game-board');
+    board.innerHTML = '';
+    board.style.setProperty('--word-length', state.wordLength);
+    for (let i = 0; i < CONFIG.MAX_GUESSES; i++) {
       const row = document.createElement('div');
-      row.classList.add('board-row');
-      row.style.gridTemplateColumns = `repeat(${wordLength}, 1fr)`;
-
-      for (let j = 0; j < wordLength; j++) {
+      row.className = 'board-row';
+      row.style.gridTemplateColumns = `repeat(${state.wordLength}, 1fr)`;
+      for (let j = 0; j < state.wordLength; j++) {
         const tile = document.createElement('div');
-        tile.classList.add('tile');
-        tile.setAttribute('data-row', i);
-        tile.setAttribute('data-col', j);
+        tile.className = 'tile';
+        tile.dataset.row = i;
+        tile.dataset.col = j;
         row.appendChild(tile);
       }
-      gameBoard.appendChild(row);
+      board.appendChild(row);
     }
-
-    console.log('Game board created with', maxGuesses * wordLength, 'tiles');
   }
 
-  // Create keyboard
   function createKeyboard() {
-    const keyboard = document.getElementById('keyboard');
+    const keyboard = $('keyboard');
     keyboard.innerHTML = '';
-
     const rows = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
-    rows.forEach((row, rowIndex) => {
-      const rowDiv = document.createElement('div');
-      rowDiv.classList.add('keyboard-row');
-
-      // Add Enter key on the left of the last row
-      if (rowIndex === 2) {
-        const enterButton = document.createElement('button');
-        enterButton.textContent = 'Enter';
-        enterButton.classList.add('wide-button');
-        enterButton.setAttribute('aria-label', 'Enter');
-        enterButton.addEventListener('click', () => handleKeyPress('Enter'));
-        rowDiv.appendChild(enterButton);
-      }
-
-      row.split('').forEach((key) => {
-        const button = document.createElement('button');
-        button.textContent = key;
-        button.id = 'key-' + key;
-        button.setAttribute('aria-label', key);
-        button.addEventListener('click', () => handleKeyPress(key));
-        rowDiv.appendChild(button);
-      });
-
-      // Add Backspace key on the right of the last row
-      if (rowIndex === 2) {
-        const backspaceButton = document.createElement('button');
-        backspaceButton.textContent = '←';
-        backspaceButton.classList.add('wide-button');
-        backspaceButton.setAttribute('aria-label', 'Backspace');
-        backspaceButton.addEventListener('click', () => handleKeyPress('Backspace'));
-        rowDiv.appendChild(backspaceButton);
-      }
-
-      keyboard.appendChild(rowDiv);
+    rows.forEach((row, idx) => {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'keyboard-row';
+      if (idx === 2) rowEl.appendChild(makeKey('Enter', 'wide-button'));
+      for (const ch of row) rowEl.appendChild(makeKey(ch));
+      if (idx === 2) rowEl.appendChild(makeKey('Backspace', 'wide-button', '←'));
+      keyboard.appendChild(rowEl);
     });
   }
 
-  // Handle key presses
-  function handleKeyPress(key) {
-    if (!gameActive) return;
+  function makeKey(key, extraClass = '', display = key) {
+    const btn = document.createElement('button');
+    btn.textContent = display;
+    btn.setAttribute('aria-label', key);
+    btn.type = 'button';
+    if (key.length === 1) btn.id = 'key-' + key;
+    if (extraClass) btn.classList.add(extraClass);
+    btn.addEventListener('click', () => handleKeyPress(key));
+    return btn;
+  }
 
-    console.log('Key pressed:', key);
-
-    key = key.toLowerCase();
-
+  function handleKeyPress(rawKey) {
+    if (!state.gameActive || state.animating) return;
+    const key = rawKey.toLowerCase();
     if (key === 'enter') {
-      if (currentGuess.length === wordLength) {
-        if (validWordsSet.has(currentGuess.toLowerCase())) {
-          submitGuess();
-        } else {
-          showInvalidGuess();
-        }
+      if (state.currentGuess.length !== state.wordLength) {
+        toast('Not enough letters.', 'warn');
+        return;
       }
+      if (!state.validWordsSet.has(state.currentGuess)) {
+        showInvalidGuess();
+        toast('Not in word list.', 'warn');
+        return;
+      }
+      submitGuess();
     } else if (key === 'backspace') {
-      currentGuess = currentGuess.slice(0, -1);
+      state.currentGuess = state.currentGuess.slice(0, -1);
       updateBoard();
     } else if (/^[a-z]$/.test(key)) {
-      if (currentGuess.length < wordLength) {
-        currentGuess += key;
+      if (state.currentGuess.length < state.wordLength) {
+        state.currentGuess += key;
         updateBoard();
       }
     }
   }
 
-  // Update game board
   function updateBoard() {
-    const gameBoard = document.getElementById('game-board');
-    const currentRow = gameBoard.children[guesses.length];
-    const tiles = currentRow.querySelectorAll('.tile');
-
-    for (let i = 0; i < wordLength; i++) {
+    const board = $('game-board');
+    const row = board.children[state.guesses.length];
+    if (!row) return;
+    const tiles = row.children;
+    for (let i = 0; i < state.wordLength; i++) {
       const tile = tiles[i];
-      tile.textContent = currentGuess[i] ? currentGuess[i].toUpperCase() : '';
-      tile.classList.remove('invalid');
-      tile.classList.remove('flip');
-    }
-
-    console.log('Board updated. Current guess:', currentGuess);
-  }
-
-  // Submit guess and update keyboard
-  function submitGuess() {
-    console.log('Submitting guess:', currentGuess);
-
-    const gameBoard = document.getElementById('game-board');
-    const currentRow = gameBoard.children[guesses.length];
-    const tiles = currentRow.querySelectorAll('.tile');
-    const guessArray = currentGuess.split('');
-    const targetArray = targetWord.split('');
-    const matchedIndices = new Array(wordLength).fill(false);
-    const animationPromises = [];
-
-    // First pass: Check for correct letters in the correct position (Green)
-    for (let i = 0; i < wordLength; i++) {
-      if (guessArray[i] === targetArray[i]) {
-        matchedIndices[i] = true;
+      const ch = state.currentGuess[i];
+      tile.textContent = ch ? ch.toUpperCase() : '';
+      tile.classList.remove('invalid', 'pop');
+      if (ch) {
+        void tile.offsetWidth;
+        tile.classList.add('pop');
       }
     }
+  }
 
-    // Second pass: Check for correct letters in the wrong position (Yellow) and incorrect letters (Grey)
-    for (let i = 0; i < wordLength; i++) {
-      const tile = tiles[i];
-      const keyButton = document.getElementById('key-' + guessArray[i].toUpperCase());
-
-      setTimeout(() => {
-        tile.classList.add('flip');
-
-        if (guessArray[i] === targetArray[i]) {
-          tile.classList.add('correct');
-
-          // Apply water filling animation
-          if (!correctPositions[i]) {
-            tile.classList.add('correct-first-time');
-            correctPositions[i] = true;
-            // Play pop sound
-            playPopSound();
-          }
-
-          // Always set the key to 'key-correct' regardless of its current class
-          keyButton.classList.remove('key-absent', 'key-present');
-          keyButton.classList.add('key-correct');
-        } else if (targetWord.includes(guessArray[i])) {
-          tile.classList.add('present');
-          // Upgrade to 'key-present' only if it's not already 'key-correct'
-          if (!keyButton.classList.contains('key-correct')) {
-            keyButton.classList.remove('key-absent');
-            keyButton.classList.add('key-present');
-          }
-        } else {
-          tile.classList.add('absent');
-          // Only set to 'key-absent' if it hasn't been marked before
-          if (
-            !keyButton.classList.contains('key-correct') &&
-            !keyButton.classList.contains('key-present') &&
-            !keyButton.classList.contains('key-absent')
-          ) {
-            keyButton.classList.add('key-absent');
-          }
+  function evaluateGuess(guess, target) {
+    const result = new Array(guess.length).fill('absent');
+    const targetArr = target.split('');
+    const taken = new Array(target.length).fill(false);
+    for (let i = 0; i < guess.length; i++) {
+      if (guess[i] === targetArr[i]) {
+        result[i] = 'correct';
+        taken[i] = true;
+      }
+    }
+    for (let i = 0; i < guess.length; i++) {
+      if (result[i] === 'correct') continue;
+      for (let j = 0; j < targetArr.length; j++) {
+        if (!taken[j] && guess[i] === targetArr[j]) {
+          result[i] = 'present';
+          taken[j] = true;
+          break;
         }
-      }, i * 500);
-
-      animationPromises.push(new Promise(resolve => setTimeout(resolve, (i + 1) * 500)));
-    }
-
-    Promise.all(animationPromises).then(() => {
-      guesses.push(currentGuess);
-
-      if (currentGuess === targetWord) {
-        gameActive = false;
-        setTimeout(() => {
-          showWinningAnimation();
-          logResult(true, currentMode);
-          updateAchievements();
-          if (currentMode === 'daily') {
-            localStorage.setItem('dailyAttempted', new Date().toLocaleDateString('en-CA'));
-          }
-        }, 500);
-      } else if (guesses.length === maxGuesses) {
-        gameActive = false;
-        setTimeout(() => {
-          alert(`Game Over! The word was ${targetWord.toUpperCase()}.`);
-          logResult(false, currentMode);
-          updateAchievements();
-          if (currentMode === 'daily') {
-            localStorage.setItem('dailyAttempted', new Date().toLocaleDateString('en-CA'));
-          }
-        }, 500);
       }
-
-      currentGuess = '';
-    });
+    }
+    return result;
   }
 
-  // Function to play pop sound
-  function playPopSound() {
-    const popSound = new Audio('pop-sound.mp3'); // Ensure you have this audio file
-    popSound.play();
+  function submitGuess() {
+    state.animating = true;
+    const board = $('game-board');
+    const row = board.children[state.guesses.length];
+    const tiles = row.children;
+    const evaluation = evaluateGuess(state.currentGuess, state.targetWord);
+
+    for (let i = 0; i < state.wordLength; i++) {
+      const tile = tiles[i];
+      tile.style.setProperty('--flip-delay', `${i * CONFIG.FLIP_STEP_MS}ms`);
+      tile.classList.add('flip');
+      setTimeout(() => {
+        tile.classList.add(evaluation[i]);
+        if (evaluation[i] === 'correct' && !state.correctPositions[i]) {
+          state.correctPositions[i] = true;
+          tile.classList.add('correct-first-time');
+          playPopSound();
+        }
+        updateKeyColor(state.currentGuess[i], evaluation[i]);
+      }, i * CONFIG.FLIP_STEP_MS + CONFIG.FLIP_DURATION_MS / 2);
+    }
+
+    const totalDelay = state.wordLength * CONFIG.FLIP_STEP_MS + CONFIG.FLIP_DURATION_MS;
+    setTimeout(() => {
+      state.guesses.push(state.currentGuess);
+      const won = state.currentGuess === state.targetWord;
+      state.currentGuess = '';
+      state.animating = false;
+      if (won) {
+        state.gameActive = false;
+        endGame(true);
+      } else if (state.guesses.length >= CONFIG.MAX_GUESSES) {
+        state.gameActive = false;
+        endGame(false);
+      }
+    }, totalDelay);
   }
 
-  // Function to log the result to Firebase
-  function logResult(won, mode) {
-    const endTime = new Date();
-    const timeTaken = Math.floor((endTime - startTime) / 1000); // in seconds
-    const today = new Date().toLocaleDateString('en-CA'); // e.g., "2024-09-25"
-
-    const log = {
-      player: playerName,
-      time: endTime.toLocaleString(),
-      date: today, // Add date to the log
-      timeTaken: timeTaken,
-      attempts: guesses.length,
-      word: targetWord.toUpperCase(),
-      won: won,
-    };
-
-    if (userId) {
-      // Save the log to Firebase under the appropriate mode and date
-      database.ref(`leaderboard/${mode}/${today}/${Date.now()}`).set(log)
-        .catch(error => {
-          console.error('Error writing to leaderboard:', error);
-          alert('Unable to log your game result. Please try again later.');
-        });
-
-      // Update user statistics
-      updateUserStats(won, guesses.length);
-    } else {
-      alert('Please log in to save your game results.');
+  function updateKeyColor(letter, status) {
+    const key = $('key-' + letter.toUpperCase());
+    if (!key) return;
+    if (key.classList.contains('key-correct')) return;
+    if (status === 'correct') {
+      key.classList.remove('key-absent', 'key-present');
+      key.classList.add('key-correct');
+    } else if (status === 'present' && !key.classList.contains('key-present')) {
+      key.classList.remove('key-absent');
+      key.classList.add('key-present');
+    } else if (status === 'absent' && !key.classList.contains('key-present')) {
+      key.classList.add('key-absent');
     }
   }
 
-  // Show invalid guess animation
-  function showInvalidGuess() {
-    const gameBoard = document.getElementById('game-board');
-    const currentRow = gameBoard.children[guesses.length];
-    const tiles = currentRow.querySelectorAll('.tile');
-
-    tiles.forEach(tile => {
-      tile.classList.add('invalid');
-    });
-
-    setTimeout(() => {
-      tiles.forEach(tile => {
-        tile.classList.remove('invalid');
-      });
-      }, 500);
+  function endGame(won) {
+    logResult(won, state.currentMode);
+    updateAchievements();
+    if (state.currentMode === CONFIG.MODES.DAILY) {
+      localStorage.setItem('dailyAttempted', todayISO());
+      localStorage.setItem('lastDailyWord', state.targetWord);
+    }
+    if (won) {
+      showWinningAnimation();
+    } else {
+      toast(`The word was ${state.targetWord.toUpperCase()}.`, 'info', 5000);
+    }
   }
 
-  // Function to show the winning animation and modal
-  function showWinningAnimation() {
-    const winningModal = document.getElementById('winning-modal');
-    winningModal.style.display = 'block';
-    winningModal.setAttribute('aria-hidden', 'false');
+  function showDailyAttemptedModal() {
+    const lastWord = localStorage.getItem('lastDailyWord') || '';
+    const content = $('daily-attempt-content');
+    content.innerHTML = `
+      <p>You've already played today's word. Come back tomorrow!</p>
+      ${lastWord ? `<p>Today's word was: <strong>${sanitize(lastWord.toUpperCase())}</strong></p>` : ''}
+      <div class="modal-actions">
+        <button id="switch-to-random" class="modal-button">Play Random Instead</button>
+      </div>
+    `;
+    $('switch-to-random').addEventListener('click', () => {
+      closeModal('daily-attempt-modal');
+      startGame(CONFIG.MODES.RANDOM);
+    }, { once: true });
+    openModal('daily-attempt-modal');
+  }
 
-    // Display the word in the modal
-    const winningWordDisplay = document.getElementById('winning-word-display');
-    winningWordDisplay.textContent = `You guessed the word: ${targetWord.toUpperCase()}`;
+  function playPopSound() {
+    try {
+      const audio = new Audio('pop-sound.mp3');
+      audio.volume = 0.4;
+      audio.play().catch(() => {});
+    } catch {}
+  }
 
-    // Fetch and display the word's definition
-    fetchWordDefinition(targetWord)
-      .then(details => {
-        const definitionDiv = document.getElementById('word-definition');
-        let htmlContent = `<strong>Definition:</strong><br>`;
-        details.forEach(detail => {
-          htmlContent += `<strong>${detail.partOfSpeech}:</strong> ${detail.definitions.join(', ')}<br>`;
-          if (detail.synonyms && detail.synonyms.length > 0) {
-            htmlContent += `<strong>Synonyms:</strong> ${detail.synonyms.join(', ')}<br>`;
-          }
-          if (detail.antonyms && detail.antonyms.length > 0) {
-            htmlContent += `<strong>Antonyms:</strong> ${detail.antonyms.join(', ')}<br>`;
-          }
-        });
-        definitionDiv.innerHTML = htmlContent;
-      })
-      .catch(error => {
-        const definitionDiv = document.getElementById('word-definition');
-        definitionDiv.innerHTML = `<strong>Definition:</strong> Not found.`;
-        console.error('Error fetching word details:', error);
+  function logResult(won, mode) {
+    const timeTaken = Math.floor((Date.now() - state.startTime) / 1000);
+    const today = todayISO();
+    const log = {
+      player: state.playerName || 'Anonymous',
+      time: new Date().toLocaleString(),
+      date: today,
+      timeTaken,
+      attempts: state.guesses.length,
+      word: state.targetWord.toUpperCase(),
+      won,
+    };
+    if (state.userId) {
+      database.ref(`leaderboard/${mode}/${today}/${Date.now()}`).set(log).catch((err) => {
+        console.error('Leaderboard write failed:', err);
+        toast('Could not save result.', 'error');
       });
+      updateUserStats(won, state.guesses.length);
+    }
+  }
 
-    // Trigger the confetti animation
+  function showInvalidGuess() {
+    const row = $('game-board').children[state.guesses.length];
+    if (!row) return;
+    [...row.children].forEach((tile) => tile.classList.add('invalid'));
+    setTimeout(() => {
+      [...row.children].forEach((tile) => tile.classList.remove('invalid'));
+    }, CONFIG.SHAKE_MS);
+  }
+
+  function showWinningAnimation() {
+    openModal('winning-modal');
+    $('winning-word-display').textContent = `You guessed: ${state.targetWord.toUpperCase()}`;
+    $('word-definition').innerHTML = '<em>Loading definition…</em>';
+    fetchWordDefinition(state.targetWord)
+      .then((details) => {
+        const def = $('word-definition');
+        def.innerHTML = '';
+        const header = document.createElement('strong');
+        header.textContent = 'Definition:';
+        def.appendChild(header);
+        def.appendChild(document.createElement('br'));
+        details.forEach((d) => {
+          const pos = document.createElement('em');
+          pos.textContent = d.partOfSpeech + ': ';
+          def.appendChild(pos);
+          def.appendChild(document.createTextNode(d.definitions.join('; ')));
+          def.appendChild(document.createElement('br'));
+        });
+      })
+      .catch(() => {
+        $('word-definition').innerHTML = '<em>Definition not available.</em>';
+      });
     triggerConfetti();
   }
 
-  // Function to trigger confetti animation
   function triggerConfetti() {
-    const confettiCanvas = document.getElementById('confetti-canvas');
-    const myConfetti = confetti.create(confettiCanvas, { resize: true, useWorker: true });
-    const end = Date.now() + (5 * 1000); // Run for 5 seconds
-
-    // Confetti animation frame function
+    if (typeof confetti === 'undefined') return;
+    const canvas = $('confetti-canvas');
+    const myConfetti = confetti.create(canvas, { resize: true, useWorker: true });
+    const end = Date.now() + CONFIG.CONFETTI_MS;
     (function frame() {
-      // Launch confetti from random positions
-      myConfetti({
-        particleCount: 5,
-        angle: 60,
-        spread: 55,
-        origin: { x: Math.random() },
-      });
-      myConfetti({
-        particleCount: 5,
-        angle: 120,
-        spread: 55,
-        origin: { x: Math.random() },
-      });
-
-      // Continue the animation if time hasn't expired
-      if (Date.now() < end) {
-        requestAnimationFrame(frame);
-      }
+      myConfetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: Math.random() } });
+      myConfetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: Math.random() } });
+      if (Date.now() < end) requestAnimationFrame(frame);
     })();
   }
 
-  // Fetch word definition from dictionary API
   async function fetchWordDefinition(word) {
-    try {
-      const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
-      if (!response.ok) {
-        throw new Error('Word details not found');
-      }
-      const data = await response.json();
-      const meanings = data[0].meanings.map(meaning => ({
-        partOfSpeech: meaning.partOfSpeech,
-        definitions: meaning.definitions.map(def => def.definition),
-        synonyms: meaning.synonyms,
-        antonyms: meaning.antonyms,
-      }));
-      return meanings;
-    } catch (error) {
-      console.error('Error fetching word details:', error);
-      return [{
-        partOfSpeech: 'N/A',
-        definitions: ['Details not available.'],
-        synonyms: [],
-        antonyms: [],
-      }];
-    }
+    const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
+    if (!res.ok) throw new Error('Definition not found');
+    const data = await res.json();
+    return data[0].meanings.map((m) => ({
+      partOfSpeech: m.partOfSpeech,
+      definitions: m.definitions.map((d) => d.definition),
+    }));
   }
 
-  // Share on Twitter
-  document.getElementById('share-button').addEventListener('click', () => {
-    const shareText = generateShareText();
-    const twitterURL = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
-    window.open(twitterURL, '_blank');
-  });
-
-  // Share on WhatsApp
-  document.getElementById('share-whatsapp-button').addEventListener('click', () => {
-    const shareText = generateShareText();
-    const whatsappURL = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-    window.open(whatsappURL, '_blank');
-  });
-
-  // Generate share text similar to Wordle, including time taken
   function generateShareText() {
-    const endTime = new Date();
-    const timeTaken = Math.floor((endTime - startTime) / 1000); // in seconds
-
-    let shareText = `Wordle Upgrade - ${currentMode.charAt(0).toUpperCase() + currentMode.slice(1)} Mode\n`;
-    shareText += `${guesses.length}/${maxGuesses}, Time: ${timeTaken}s\n\n`;
-
-    guesses.forEach(guess => {
-      let rowResult = '';
-      for (let i = 0; i < wordLength; i++) {
-        if (guess[i] === targetWord[i]) {
-          rowResult += '🟩';
-        } else if (targetWord.includes(guess[i])) {
-          rowResult += '🟨';
-        } else {
-          rowResult += '⬛';
-        }
-      }
-      shareText += rowResult + '\n';
+    const timeTaken = Math.floor((Date.now() - state.startTime) / 1000);
+    const modeLabel = state.currentMode === CONFIG.MODES.SIX ? '6-Letter' : state.currentMode.charAt(0).toUpperCase() + state.currentMode.slice(1);
+    let txt = `Wordle Upgrade — ${modeLabel}\n${state.guesses.length}/${CONFIG.MAX_GUESSES} in ${timeTaken}s\n\n`;
+    state.guesses.forEach((guess) => {
+      const ev = evaluateGuess(guess, state.targetWord);
+      txt += ev.map((s) => (s === 'correct' ? '🟩' : s === 'present' ? '🟨' : '⬛')).join('') + '\n';
     });
-
-    return shareText;
+    return txt;
   }
 
-  // Statistics Tracking
   function updateUserStats(won, attempts) {
-    if (!userId) return; // Only track stats for authenticated users
-
-    const statsRef = database.ref(`users/${userId}/stats`);
-    statsRef.transaction((currentStats) => {
-      if (currentStats === null) {
-        currentStreak = won ? 1 : 0;
+    if (!state.userId) return;
+    const statsRef = database.ref(`users/${state.userId}/stats`);
+    statsRef.transaction((s) => {
+      if (s === null) {
+        state.currentStreak = won ? 1 : 0;
         return {
           gamesPlayed: 1,
           gamesWon: won ? 1 : 0,
-          currentStreak: currentStreak,
-          maxStreak: currentStreak,
+          currentStreak: state.currentStreak,
+          maxStreak: state.currentStreak,
           totalAttempts: won ? attempts : 0,
         };
-      } else {
-        currentStats.gamesPlayed += 1;
-        if (won) {
-          currentStats.gamesWon += 1;
-          currentStats.currentStreak += 1;
-          currentStreak = currentStats.currentStreak;
-          if (currentStats.currentStreak > currentStats.maxStreak) {
-            currentStats.maxStreak = currentStats.currentStreak;
-          }
-          currentStats.totalAttempts += attempts;
-        } else {
-          currentStats.currentStreak = 0;
-          currentStreak = 0;
-        }
-        return currentStats;
       }
+      s.gamesPlayed += 1;
+      if (won) {
+        s.gamesWon += 1;
+        s.currentStreak = (s.currentStreak || 0) + 1;
+        if (s.currentStreak > (s.maxStreak || 0)) s.maxStreak = s.currentStreak;
+        s.totalAttempts = (s.totalAttempts || 0) + attempts;
+      } else {
+        s.currentStreak = 0;
+      }
+      state.currentStreak = s.currentStreak;
+      return s;
     }).then(() => {
-      document.getElementById('streak-counter').textContent = `Current Streak: ${currentStreak}`;
-    });
-  }
-
-  // Display Statistics Chart
-  function displayStatistics() {
-    if (!userId) return;
-
-    const statsRef = database.ref(`users/${userId}/stats`);
-    statsRef.once('value').then(snapshot => {
-      const stats = snapshot.val();
-      if (stats) {
-        const gamesPlayed = stats.gamesPlayed;
-        const gamesWon = stats.gamesWon;
-        const winPercentage = gamesPlayed > 0 ? ((gamesWon / gamesPlayed) * 100).toFixed(2) : 0;
-        const averageAttempts = gamesWon > 0 ? (stats.totalAttempts / stats.gamesWon).toFixed(2) : 0;
-        currentStreak = stats.currentStreak || 0;
-
-        document.getElementById('streak-counter').textContent = `Current Streak: ${currentStreak}`;
-
-        const ctx = document.getElementById('stats-chart').getContext('2d');
-        new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: ['Games Played', 'Win %', 'Avg Attempts'],
-            datasets: [{
-              label: 'Statistics',
-              data: [gamesPlayed, winPercentage, averageAttempts],
-              backgroundColor: ['#538D4E', '#B59F3B', '#3A3A3C']
-            }]
-          },
-          options: {
-            responsive: true,
-            scales: {
-              y: { beginAtZero: true }
-            }
-          }
-        });
-      }
-    });
-  }
-
-  // Function to sanitize HTML to prevent XSS
-  function sanitizeHTML(str) {
-    const temp = document.createElement('div');
-    temp.textContent = str;
-    return temp.innerHTML;
-  }
-
-  // Handle Physical Keyboard Input
-  document.addEventListener('keydown', (event) => {
-    // Check if modals are open and skip if any modal is open
-    const modals = document.querySelectorAll('.modal');
-    let isAnyModalOpen = false;
-
-    modals.forEach((modal) => {
-      if (modal.style.display === 'block') {
-        isAnyModalOpen = true;
-      }
-    });
-
-    if (isAnyModalOpen) return;
-
-    const key = event.key;
-
-    // Only allow a single character or Backspace/Enter
-    if (key === 'Backspace' || key === 'Enter' || /^[a-zA-Z]$/.test(key)) {
-      handleKeyPress(key.toLowerCase());
-    }
-  });
-
-  // Update user display
-  function updateUserDisplay() {
-    const userDisplay = document.getElementById('user-display');
-    const loginButton = document.getElementById('login-button');
-    const logoutButton = document.getElementById('logout-button');
-
-    if (userId) {
-      userDisplay.textContent = 'Logged in as: ' + playerName;
-      logoutButton.style.display = 'inline-block';
-      loginButton.style.display = 'none';
-    } else {
-      userDisplay.textContent = 'Not logged in';
-      logoutButton.style.display = 'none';
-      loginButton.style.display = 'inline-block';
-    }
-  }
-
-  // Authentication Logic
-  const authModalElement = document.getElementById('auth-modal');
-  const emailAuthModalElement = document.getElementById('email-auth-modal');
-
-  // Open Authentication Modal on Page Load if Not Authenticated
-  auth.onAuthStateChanged((user) => {
-    if (user) {
-      userId = user.uid;
-      playerName = user.displayName || user.email;
-      localStorage.setItem('playerName', playerName);
-      authModalElement.style.display = 'none';
-      emailAuthModalElement.style.display = 'none';
+      $('streak-counter').textContent = `Current Streak: ${state.currentStreak}`;
       displayStatistics();
-      updateUserDisplay();
-    } else {
-      userId = null;
-      playerName = '';
-      updateUserDisplay();
-    }
-  });
-
-  // Login Button Event Listener
-  document.getElementById('login-button').addEventListener('click', () => {
-    authModalElement.style.display = 'block';
-    authModalElement.setAttribute('aria-hidden', 'false');
-  });
-
-  // Email Sign-In Button
-  document.getElementById('email-signin-button').addEventListener('click', () => {
-    authModalElement.style.display = 'none';
-    authModalElement.setAttribute('aria-hidden', 'true');
-    emailAuthModalElement.style.display = 'block';
-    emailAuthModalElement.setAttribute('aria-hidden', 'false');
-  });
-
-  // Email Sign-In Submit
-  document.getElementById('email-signin-submit-button').addEventListener('click', () => {
-    const email = document.getElementById('user-email').value.trim();
-    const password = document.getElementById('user-password').value.trim();
-    if (email && password) {
-      auth.signInWithEmailAndPassword(email, password)
-        .then(() => {
-          // Success: Close the email auth modal
-          emailAuthModalElement.style.display = 'none';
-          emailAuthModalElement.setAttribute('aria-hidden', 'true');
-          authModalElement.style.display = 'none';
-          authModalElement.setAttribute('aria-hidden', 'true');
-        })
-        .catch(error => {
-          console.error('Email Sign-In Error:', error);
-          alert('Error signing in. Please check your credentials.');
-        });
-    } else {
-      alert('Please enter both email and password.');
-    }
-  });
-
-  // Email Sign-Up Button
-  document.getElementById('email-signup-button').addEventListener('click', () => {
-    authModalElement.style.display = 'none';
-    authModalElement.setAttribute('aria-hidden', 'true');
-    emailAuthModalElement.style.display = 'block';
-    emailAuthModalElement.setAttribute('aria-hidden', 'false');
-  });
-
-  // Email Sign-Up Submit
-  document.getElementById('email-signup-submit-button').addEventListener('click', () => {
-    const email = document.getElementById('user-email').value.trim();
-    const password = document.getElementById('user-password').value.trim();
-    if (email && password) {
-      auth.createUserWithEmailAndPassword(email, password)
-        .then(() => {
-          // Success: Close the email auth modal
-          emailAuthModalElement.style.display = 'none';
-          emailAuthModalElement.setAttribute('aria-hidden', 'true');
-          authModalElement.style.display = 'none';
-          authModalElement.setAttribute('aria-hidden', 'true');
-        })
-        .catch(error => {
-          console.error('Email Sign-Up Error:', error);
-          alert('Error signing up. Please try a different email.');
-        });
-    } else {
-      alert('Please enter both email and password.');
-    }
-  });
-
-  // Logout functionality
-  document.getElementById('logout-button').addEventListener('click', () => {
-    auth.signOut().then(() => {
-      console.log('User signed out');
-      userId = null;
-      playerName = '';
-      localStorage.removeItem('playerName');
-      updateUserDisplay();
-      // Optionally, restart the game
-      startGame('daily');
-    }).catch((error) => {
-      console.error('Error signing out:', error);
     });
-  });
+  }
 
-  // Ensure modals have close buttons and event listeners
-  const modalsList = document.querySelectorAll('.modal');
-  modalsList.forEach(modal => {
-    const closeButton = modal.querySelector('.close');
-    if (closeButton) {
-      closeButton.addEventListener('click', () => {
-        modal.style.display = 'none';
-        modal.setAttribute('aria-hidden', 'true');
+  function displayStatistics() {
+    if (!state.userId) return;
+    database.ref(`users/${state.userId}/stats`).once('value').then((snap) => {
+      const stats = snap.val();
+      if (!stats) return;
+      const winPct = stats.gamesPlayed > 0 ? ((stats.gamesWon / stats.gamesPlayed) * 100).toFixed(1) : 0;
+      const avgAttempts = stats.gamesWon > 0 ? (stats.totalAttempts / stats.gamesWon).toFixed(2) : 0;
+      state.currentStreak = stats.currentStreak || 0;
+      $('streak-counter').textContent = `Current Streak: ${state.currentStreak}`;
+      const ctx = $('stats-chart').getContext('2d');
+      if (state.statsChart) state.statsChart.destroy();
+      state.statsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Games Played', 'Win %', 'Avg Attempts'],
+          datasets: [{
+            label: 'Statistics',
+            data: [stats.gamesPlayed, winPct, avgAttempts],
+            backgroundColor: ['#538D4E', '#B59F3B', '#3A3A3C'],
+          }],
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } },
       });
-    }
-  });
+    });
+  }
 
-  // View leaderboard data
+  function updateUserDisplay() {
+    const userDisplay = $('user-display');
+    const loginBtn = $('login-button');
+    const logoutBtn = $('logout-button');
+    if (state.userId) {
+      userDisplay.textContent = 'Logged in as: ' + (state.playerName || 'Player');
+      logoutBtn.style.display = 'inline-block';
+      loginBtn.style.display = 'none';
+    } else {
+      userDisplay.textContent = state.playerName ? `Playing as: ${state.playerName}` : 'Not logged in';
+      logoutBtn.style.display = 'none';
+      loginBtn.style.display = 'inline-block';
+    }
+  }
+
   function viewLeaderboard() {
-    const leaderboardModal = document.getElementById('leaderboard-modal');
-    leaderboardModal.style.display = 'block';
-    leaderboardModal.setAttribute('aria-hidden', 'false');
-
-    const tabs = document.querySelectorAll('.tablink');
-    const tabContents = document.querySelectorAll('.tabcontent');
-
-    tabs.forEach(tab => {
-      tab.addEventListener('click', (event) => {
-        tabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-
-        tabContents.forEach(content => content.classList.remove('active'));
-        const activeContent = document.getElementById(tab.getAttribute('data-tab'));
-        activeContent.classList.add('active');
-
-        // Fetch leaderboard data for the active tab
-        const mode = tab.getAttribute('data-tab').replace('leaderboard-', '');
-        fetchLeaderboardData(mode, activeContent);
+    openModal('leaderboard-modal');
+    if (!state.leaderboardTabsBound) {
+      $$('.tablink').forEach((tab) => {
+        tab.addEventListener('click', () => {
+          $$('.tablink').forEach((t) => t.classList.remove('active'));
+          tab.classList.add('active');
+          $$('.tabcontent').forEach((c) => c.classList.remove('active'));
+          const content = $(tab.getAttribute('data-tab'));
+          content.classList.add('active');
+          const mode = tab.getAttribute('data-tab').replace('leaderboard-', '');
+          fetchLeaderboardData(mode, content);
+        });
       });
-    });
-
-    // Fetch and display leaderboard data for the active tab
-    const activeTab = document.querySelector('.tablink.active').getAttribute('data-tab');
-    const mode = activeTab.replace('leaderboard-', '');
-    const container = document.getElementById(activeTab);
-    fetchLeaderboardData(mode, container);
-  }
-
-  // Fetch leaderboard data
-  function fetchLeaderboardData(mode, container) {
-    const selectedDate = document.getElementById('leaderboard-date').value;
-    database.ref(`leaderboard/${mode}`).once('value')
-      .then(snapshot => {
-        const data = snapshot.val();
-        const leaderboardHTML = displayLeaderboard(data, mode, selectedDate);
-        container.innerHTML = leaderboardHTML;
-      })
-      .catch(error => {
-        console.error('Error fetching leaderboard data:', error);
-        container.innerHTML = '<p>Error loading leaderboard. Please try again later.</p>';
+      $('leaderboard-date').addEventListener('change', () => {
+        const activeTab = document.querySelector('.tablink.active');
+        if (!activeTab) return;
+        const tabId = activeTab.getAttribute('data-tab');
+        const mode = tabId.replace('leaderboard-', '');
+        fetchLeaderboardData(mode, $(tabId));
       });
-  }
-
-  // Display leaderboard
-  function displayLeaderboard(data, mode, selectedDate) {
-    if (!data) {
-      return `<p>No leaderboard data available for ${mode} mode.</p>`;
+      state.leaderboardTabsBound = true;
     }
+    const activeTab = document.querySelector('.tablink.active');
+    const tabId = activeTab.getAttribute('data-tab');
+    const mode = tabId.replace('leaderboard-', '');
+    fetchLeaderboardData(mode, $(tabId));
+  }
 
-    const allEntries = [];
+  function fetchLeaderboardData(mode, container) {
+    container.innerHTML = '<p class="loading">Loading leaderboard…</p>';
+    const selectedDate = $('leaderboard-date').value;
+    database.ref(`leaderboard/${mode}`).once('value')
+      .then((snap) => {
+        renderLeaderboard(snap.val(), mode, selectedDate, container);
+      })
+      .catch((err) => {
+        console.error('Leaderboard fetch failed:', err);
+        container.innerHTML = '<p>Error loading leaderboard. Try again later.</p>';
+      });
+  }
 
-    // Function to recursively extract entries
-    function extractEntries(obj, path = '') {
-      Object.keys(obj).forEach(key => {
-        const value = obj[key];
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
-          if (value.player) {
-            // Filter by selected date if provided
-            if (selectedDate) {
-              const entryDate = value.date || '';
-              if (entryDate === selectedDate) {
-                allEntries.push(value);
-              }
-            } else {
-              allEntries.push(value);
-            }
+  function renderLeaderboard(data, mode, selectedDate, container) {
+    container.innerHTML = '';
+    if (!data) {
+      container.textContent = `No leaderboard data for ${mode} mode yet.`;
+      return;
+    }
+    const entries = [];
+    (function walk(obj) {
+      if (!obj || typeof obj !== 'object') return;
+      for (const v of Object.values(obj)) {
+        if (v && typeof v === 'object') {
+          if (v.player !== undefined) {
+            if (!selectedDate || v.date === selectedDate) entries.push(v);
           } else {
-            extractEntries(value, path + '/' + key);
+            walk(v);
           }
         }
+      }
+    })(data);
+
+    if (!entries.length) {
+      container.textContent = `No entries for ${mode}${selectedDate ? ' on ' + selectedDate : ''}.`;
+      return;
+    }
+
+    entries.sort((a, b) => {
+      if (a.won !== b.won) return b.won - a.won;
+      if (a.attempts !== b.attempts) return a.attempts - b.attempts;
+      return a.timeTaken - b.timeTaken;
+    });
+
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>Rank</th><th>Player</th><th>Date</th><th>Time (s)</th><th>Attempts</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    entries.slice(0, 10).forEach((entry, i) => {
+      const tr = document.createElement('tr');
+      [
+        { label: 'Rank', value: i + 1 },
+        { label: 'Player', value: entry.player },
+        { label: 'Date', value: entry.date || '' },
+        { label: 'Time (s)', value: entry.timeTaken },
+        { label: 'Attempts', value: entry.attempts },
+      ].forEach(({ label, value }) => {
+        const td = document.createElement('td');
+        td.setAttribute('data-label', label);
+        td.textContent = value;
+        tr.appendChild(td);
       });
-    }
-
-    extractEntries(data);
-
-    if (allEntries.length === 0) {
-      return `<p>No leaderboard data available for ${mode} mode on the selected date.</p>`;
-    }
-
-    // Sort the entries
-    allEntries.sort((a, b) => {
-      if (a.won !== b.won) return b.won - a.won; // Sort by wins first
-      if (a.attempts !== b.attempts) return a.attempts - b.attempts; // Then by attempts
-      return a.timeTaken - b.timeTaken; // Finally by time taken
+      tbody.appendChild(tr);
     });
-
-    let leaderboardHTML = '<table><tr><th>Rank</th><th>Player</th><th>Date</th><th>Time (s)</th><th>Attempts</th></tr>';
-
-    const dateOptions = { year: 'numeric', month: 'short', day: 'numeric' };
-
-    allEntries.slice(0, 10).forEach((entry, index) => {
-      const date = new Date(entry.time);
-      const formattedDate = date.toLocaleDateString('en-US', dateOptions);
-
-      leaderboardHTML += `<tr>
-        <td data-label="Rank">${index + 1}</td>
-        <td data-label="Player">${sanitizeHTML(entry.player)}</td>
-        <td data-label="Date">${formattedDate}</td>
-        <td data-label="Time (s)">${entry.timeTaken}</td>
-        <td data-label="Attempts">${entry.attempts}</td>
-      </tr>`;
-    });
-
-    leaderboardHTML += '</table>';
-    return leaderboardHTML;
+    table.appendChild(tbody);
+    container.appendChild(table);
   }
 
-  // Add event listener for date input
-  document.getElementById('leaderboard-date').addEventListener('change', () => {
-    const activeTab = document.querySelector('.tablink.active').getAttribute('data-tab');
-    const mode = activeTab.replace('leaderboard-', '');
-    const container = document.getElementById(activeTab);
-    fetchLeaderboardData(mode, container);
-  });
-
-  // Add event listener for view leaderboard button
-  document.getElementById('view-leaderboard').addEventListener('click', viewLeaderboard);
-
-  // Initialize the game on page load
-  window.addEventListener('load', () => {
-    console.log('Page loaded, initializing game');
-    startGame('daily');
-  });
-
-  // Define updateAchievements function
   function updateAchievements() {
-    if (!userId) return;
-
-    const achievementsRef = database.ref(`users/${userId}/achievements`);
-    const statsRef = database.ref(`users/${userId}/stats`);
-
+    if (!state.userId) return;
+    const achievementsRef = database.ref(`users/${state.userId}/achievements`);
+    const statsRef = database.ref(`users/${state.userId}/stats`);
     Promise.all([achievementsRef.once('value'), statsRef.once('value')])
-      .then(([achievementsSnapshot, statsSnapshot]) => {
-        const achievements = achievementsSnapshot.val() || {};
-        const stats = statsSnapshot.val() || {};
-
-        // Check for new achievements
-        if (stats.gamesWon >= 1 && !achievements.firstWin) {
-          achievements.firstWin = true;
-        }
-        if (stats.gamesWon >= 10 && !achievements.tenWins) {
-          achievements.tenWins = true;
-        }
-        if (stats.currentStreak >= 5 && !achievements.fiveStreak) {
-          achievements.fiveStreak = true;
-        }
-        if (stats.maxStreak >= 10 && !achievements.tenStreak) {
-          achievements.tenStreak = true;
-        }
-
-        // Update achievements in Firebase
-        achievementsRef.set(achievements);
-
-        // Display new achievements
-        displayAchievements(achievements);
+      .then(([aSnap, sSnap]) => {
+        const ach = aSnap.val() || {};
+        const stats = sSnap.val() || {};
+        const newly = [];
+        const check = (key, condition, name) => {
+          if (condition && !ach[key]) {
+            ach[key] = true;
+            newly.push(name);
+          }
+        };
+        check('firstWin', stats.gamesWon >= 1, 'First Win');
+        check('tenWins', stats.gamesWon >= 10, 'Decathlon');
+        check('fiveStreak', (stats.currentStreak || 0) >= 5, 'Hot Streak');
+        check('tenStreak', (stats.maxStreak || 0) >= 10, 'Unstoppable');
+        achievementsRef.set(ach);
+        newly.forEach((n) => toast(`Achievement unlocked: ${n}!`, 'success', 3500));
       })
-      .catch(error => {
-        console.error('Error updating achievements:', error);
-      });
+      .catch((err) => console.error('Achievements update failed:', err));
   }
 
-  // Function to display achievements
   function displayAchievements(achievements) {
-    const achievementsList = document.getElementById('achievements-list');
-    achievementsList.innerHTML = '';
-
-    const achievementItems = [
-      { key: 'firstWin', name: 'First Win', description: 'Win your first game' },
-      { key: 'tenWins', name: 'Decathlon', description: 'Win 10 games' },
-      { key: 'fiveStreak', name: 'Hot Streak', description: 'Achieve a 5-game winning streak' },
-      { key: 'tenStreak', name: 'Unstoppable', description: 'Achieve a 10-game winning streak' }
+    const list = $('achievements-list');
+    list.innerHTML = '';
+    const items = [
+      { key: 'firstWin', name: 'First Win', desc: 'Win your first game' },
+      { key: 'tenWins', name: 'Decathlon', desc: 'Win 10 games' },
+      { key: 'fiveStreak', name: 'Hot Streak', desc: '5-game winning streak' },
+      { key: 'tenStreak', name: 'Unstoppable', desc: '10-game winning streak' },
     ];
-
-    achievementItems.forEach(item => {
+    items.forEach((item) => {
       const li = document.createElement('li');
-      li.className = 'achievement';
-      if (achievements[item.key]) {
-        li.innerHTML = `<img src="images/${item.key}.png" alt="${item.name}"> <span>${item.name}: ${item.description}</span>`;
+      li.className = 'achievement' + (achievements[item.key] ? ' unlocked' : '');
+      const icon = document.createElement('span');
+      icon.className = 'achievement-icon';
+      icon.textContent = achievements[item.key] ? '★' : '☆';
+      const text = document.createElement('span');
+      text.textContent = `${item.name} — ${achievements[item.key] ? item.desc : 'Locked'}`;
+      li.appendChild(icon);
+      li.appendChild(text);
+      list.appendChild(li);
+    });
+    openModal('achievements-modal');
+  }
+
+  function submitFeedback() {
+    const text = $('feedback-text').value.trim();
+    if (!text) {
+      toast('Please enter feedback first.', 'warn');
+      return;
+    }
+    database.ref('feedback').push({
+      user: state.userId ? state.playerName : 'Anonymous',
+      feedback: text,
+      timestamp: firebase.database.ServerValue.TIMESTAMP,
+    }).then(() => {
+      toast('Thanks for the feedback!', 'success');
+      closeModal('feedback-modal');
+      $('feedback-text').value = '';
+    }).catch((err) => {
+      console.error('Feedback submit failed:', err);
+      toast('Could not submit feedback.', 'error');
+    });
+  }
+
+  function bindAuthUI() {
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        state.userId = user.uid;
+        state.playerName = user.displayName || (user.email ? user.email.split('@')[0] : 'Player');
+        localStorage.setItem('playerName', state.playerName);
+        closeModal('auth-modal');
+        closeModal('email-auth-modal');
+        displayStatistics();
       } else {
-        li.innerHTML = `<img src="images/locked.png" alt="Locked"> <span>${item.name}: Locked</span>`;
+        state.userId = null;
+        state.playerName = localStorage.getItem('playerName') || '';
       }
-      achievementsList.appendChild(li);
+      updateUserDisplay();
     });
 
-    // Show achievements modal
-    const achievementsModal = document.getElementById('achievements-modal');
-    achievementsModal.style.display = 'block';
-    achievementsModal.setAttribute('aria-hidden', 'false');
-  }
-
-  // Add event listener for view achievements button
-  document.getElementById('view-achievements').addEventListener('click', () => {
-    if (userId) {
-      const achievementsRef = database.ref(`users/${userId}/achievements`);
-      achievementsRef.once('value')
-        .then(snapshot => {
-          const achievements = snapshot.val() || {};
-          displayAchievements(achievements);
-        })
-        .catch(error => {
-          console.error('Error fetching achievements:', error);
-        });
-    } else {
-      alert('Please log in to view your achievements.');
-    }
-  });
-
-  // Function to handle feedback submission
-  function submitFeedback() {
-    const feedbackText = document.getElementById('feedback-text').value.trim();
-    if (feedbackText) {
-      const feedbackRef = database.ref('feedback');
-      feedbackRef.push({
-        user: userId ? playerName : 'Anonymous',
-        feedback: feedbackText,
-        timestamp: firebase.database.ServerValue.TIMESTAMP
-      }).then(() => {
-        alert('Thank you for your feedback!');
-        document.getElementById('feedback-modal').style.display = 'none';
-        document.getElementById('feedback-text').value = '';
-      }).catch(error => {
-        console.error('Error submitting feedback:', error);
-        alert('There was an error submitting your feedback. Please try again.');
-      });
-    } else {
-      alert('Please enter your feedback before submitting.');
-    }
-  }
-
-  // Add event listener for feedback submission
-  document.getElementById('submit-feedback').addEventListener('click', submitFeedback);
-
-  // Add event listener for opening feedback modal
-  document.getElementById('open-feedback').addEventListener('click', () => {
-    document.getElementById('feedback-modal').style.display = 'block';
-  });
-
-  // Function to close modal when clicking outside
-  window.onclick = function(event) {
-    const modals = document.getElementsByClassName('modal');
-    for (let i = 0; i < modals.length; i++) {
-      if (event.target == modals[i]) {
-        modals[i].style.display = "none";
-        modals[i].setAttribute('aria-hidden', 'true');
+    $('login-button').addEventListener('click', () => openModal('auth-modal'));
+    $('email-signin-button').addEventListener('click', () => {
+      closeModal('auth-modal');
+      $('email-auth-modal').dataset.intent = 'signin';
+      $('email-auth-title').textContent = 'Sign In';
+      openModal('email-auth-modal');
+    });
+    $('email-signup-button').addEventListener('click', () => {
+      closeModal('auth-modal');
+      $('email-auth-modal').dataset.intent = 'signup';
+      $('email-auth-title').textContent = 'Sign Up';
+      openModal('email-auth-modal');
+    });
+    $('email-auth-submit').addEventListener('click', () => {
+      const email = $('user-email').value.trim();
+      const password = $('user-password').value;
+      if (!email || !password) {
+        toast('Email and password required.', 'warn');
+        return;
       }
+      if (password.length < 6) {
+        toast('Password must be at least 6 characters.', 'warn');
+        return;
+      }
+      const intent = $('email-auth-modal').dataset.intent || 'signin';
+      const fn = intent === 'signup' ? auth.createUserWithEmailAndPassword : auth.signInWithEmailAndPassword;
+      fn.call(auth, email, password)
+        .then(() => {
+          $('user-email').value = '';
+          $('user-password').value = '';
+        })
+        .catch((err) => {
+          toast(friendlyAuthError(err), 'error', 4000);
+          console.error('Auth error:', err);
+        });
+    });
+    $('logout-button').addEventListener('click', () => {
+      auth.signOut().catch((err) => console.error('Logout failed:', err));
+    });
+  }
+
+  function friendlyAuthError(err) {
+    switch (err && err.code) {
+      case 'auth/invalid-email': return 'Invalid email address.';
+      case 'auth/user-not-found': return 'No account with that email.';
+      case 'auth/wrong-password': return 'Wrong password.';
+      case 'auth/email-already-in-use': return 'That email is already registered.';
+      case 'auth/weak-password': return 'Password is too weak.';
+      case 'auth/network-request-failed': return 'Network error. Check your connection.';
+      default: return 'Authentication failed. Please try again.';
     }
   }
 
+  function bindModalCloseUI() {
+    $$('.modal .close').forEach((btn) => {
+      btn.addEventListener('click', () => closeModal(btn.closest('.modal')));
+    });
+    document.addEventListener('click', (e) => {
+      if (e.target.classList.contains('modal')) closeModal(e.target);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && anyModalOpen()) {
+        document.querySelectorAll('.modal.open').forEach((m) => closeModal(m));
+      }
+    });
+  }
+
+  function bindPhysicalKeyboard() {
+    document.addEventListener('keydown', (e) => {
+      if (anyModalOpen()) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const key = e.key;
+      if (key === 'Backspace' || key === 'Enter' || /^[a-zA-Z]$/.test(key)) {
+        e.preventDefault();
+        handleKeyPress(key.toLowerCase());
+      }
+    });
+  }
+
+  function bindUI() {
+    $('daily-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.DAILY));
+    $('random-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.RANDOM));
+    $('six-letter-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.SIX));
+    $('view-leaderboard').addEventListener('click', viewLeaderboard);
+    $('view-achievements').addEventListener('click', () => {
+      if (!state.userId) {
+        toast('Log in to view achievements.', 'warn');
+        return;
+      }
+      database.ref(`users/${state.userId}/achievements`).once('value')
+        .then((snap) => displayAchievements(snap.val() || {}))
+        .catch((err) => console.error('Achievements fetch failed:', err));
+    });
+    $('open-feedback').addEventListener('click', () => openModal('feedback-modal'));
+    $('submit-feedback').addEventListener('click', submitFeedback);
+    $('save-name-button').addEventListener('click', saveName);
+    $('player-name-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        saveName();
+      }
+    });
+    $('share-button').addEventListener('click', () => {
+      const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(generateShareText())}`;
+      window.open(url, '_blank', 'noopener');
+    });
+    $('share-whatsapp-button').addEventListener('click', () => {
+      const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(generateShareText())}`;
+      window.open(url, '_blank', 'noopener');
+    });
+    const copyBtn = $('copy-result-button');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(generateShareText());
+          toast('Result copied to clipboard!', 'success');
+        } catch {
+          toast('Could not copy to clipboard.', 'error');
+        }
+      });
+    }
+  }
+
+  function init() {
+    bindAuthUI();
+    bindModalCloseUI();
+    bindPhysicalKeyboard();
+    bindUI();
+    loadWordList().then(() => startGame(CONFIG.MODES.DAILY)).catch(() => {});
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js').catch((err) => {
+        console.warn('Service worker registration failed:', err);
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();
