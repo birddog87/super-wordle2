@@ -1,0 +1,14 @@
+[Unit]
+Description=Wordle Upgrade (static game server)
+After=network.target
+
+[Service]
+Type=simple
+User=htpc
+WorkingDirectory=/home/htpc/projects/super-wordle2
+ExecStart=/usr/bin/python3 -m http.server 8090 --bind 0.0.0.0 --directory /home/htpc/projects/super-wordle2
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
