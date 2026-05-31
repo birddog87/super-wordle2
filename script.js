@@ -60,6 +60,10 @@
   const $ = (id) => document.getElementById(id);
   const $$ = (sel) => document.querySelectorAll(sel);
 
+  function reduceMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
   function todayISO() {
     return new Date().toLocaleDateString('en-CA');
   }
@@ -183,9 +187,17 @@
 
   function closeModal(idOrEl) {
     const m = typeof idOrEl === 'string' ? $(idOrEl) : idOrEl;
-    if (!m) return;
-    m.classList.remove('open');
-    m.setAttribute('aria-hidden', 'true');
+    if (!m || !m.classList.contains('open')) return;
+    if (reduceMotion()) {
+      m.classList.remove('open', 'closing');
+      m.setAttribute('aria-hidden', 'true');
+      return;
+    }
+    m.classList.add('closing');
+    setTimeout(() => {
+      m.classList.remove('open', 'closing');
+      m.setAttribute('aria-hidden', 'true');
+    }, 180);
   }
 
   function anyModalOpen() {
@@ -299,11 +311,13 @@
       const row = document.createElement('div');
       row.className = 'board-row';
       row.style.gridTemplateColumns = `repeat(${state.wordLength}, 1fr)`;
+      row.style.setProperty('--row', i);
       for (let j = 0; j < state.wordLength; j++) {
         const tile = document.createElement('div');
         tile.className = 'tile';
         tile.dataset.row = i;
         tile.dataset.col = j;
+        tile.style.setProperty('--col', j);
         row.appendChild(tile);
       }
       board.appendChild(row);
@@ -317,6 +331,7 @@
     rows.forEach((row, idx) => {
       const rowEl = document.createElement('div');
       rowEl.className = 'keyboard-row';
+      rowEl.style.setProperty('--krow', idx);
       if (idx === 2) rowEl.appendChild(makeKey('Enter', 'wide-button'));
       for (const ch of row) rowEl.appendChild(makeKey(ch));
       if (idx === 2) rowEl.appendChild(makeKey('Backspace', 'wide-button', '←'));
@@ -335,8 +350,26 @@
     return btn;
   }
 
+  function flashKey(rawKey) {
+    if (reduceMotion()) return;
+    const k = rawKey.toLowerCase();
+    let btn = null;
+    if (/^[a-z]$/.test(k)) {
+      btn = $('key-' + k.toUpperCase());
+    } else {
+      const label = k === 'backspace' ? 'Backspace' : k === 'enter' ? 'Enter' : null;
+      if (label) btn = [...$$('#keyboard button')].find((b) => b.getAttribute('aria-label') === label);
+    }
+    if (!btn) return;
+    btn.classList.remove('pressed');
+    void btn.offsetWidth;
+    btn.classList.add('pressed');
+    setTimeout(() => btn.classList.remove('pressed'), 200);
+  }
+
   function handleKeyPress(rawKey) {
     if (!state.gameActive || state.animating) return;
+    flashKey(rawKey);
     const key = rawKey.toLowerCase();
     if (key === 'enter') {
       if (state.currentGuess.length !== state.wordLength) {
@@ -512,7 +545,25 @@
       localStorage.setItem(CONFIG.LS.LAST_DAILY, state.targetWord);
     }
     displayStatistics();
-    showResultModal(won);
+    if (won) {
+      celebrateWin();
+    } else {
+      setTimeout(() => showResultModal(false), 350);
+    }
+  }
+
+  function celebrateWin() {
+    const row = $('game-board').children[state.guesses.length - 1];
+    if (row && !reduceMotion()) {
+      [...row.children].forEach((t) => {
+        t.classList.remove('dance');
+        void t.offsetWidth;
+        t.classList.add('dance');
+      });
+      setTimeout(() => showResultModal(true), 1000);
+    } else {
+      showResultModal(true);
+    }
   }
 
   function showDailyAttemptedModal() {
@@ -582,7 +633,13 @@
   function displayStatistics() {
     const stats = loadStats();
     state.currentStreak = stats.currentStreak || 0;
-    $('streak-counter').textContent = `Current Streak: ${state.currentStreak} 🔥`;
+    const streakEl = $('streak-counter');
+    streakEl.textContent = `Current Streak: ${state.currentStreak} 🔥`;
+    if (state.lastResult && !reduceMotion()) {
+      streakEl.classList.remove('bump');
+      void streakEl.offsetWidth;
+      streakEl.classList.add('bump');
+    }
 
     const winPct = stats.gamesPlayed > 0 ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
     const summary = $('stats-summary');
