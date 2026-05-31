@@ -2,10 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#121213">
+  <meta name="description" content="A polished, offline-friendly Wordle game with daily, random and 6-letter modes, hard mode, stats and achievements.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Wordle Upgrade">
   <title>Wordle Upgrade</title>
   <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
   <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js" defer></script>
@@ -17,32 +24,39 @@
 <body>
   <div class="game-container">
     <header>
-      <h1>Wordle Upgrade</h1>
-      <div class="user-display-container">
-        <span id="user-display">Not logged in</span>
+      <h1>Wordle<span class="title-accent">Upgrade</span></h1>
+      <div class="header-actions">
+        <button id="open-help" class="icon-button" type="button" aria-label="How to play" title="How to play">?</button>
+        <button id="open-settings" class="icon-button" type="button" aria-label="Settings" title="Settings">⚙</button>
+        <span id="user-display" class="user-display">Guest</span>
         <button id="login-button" type="button">Login</button>
         <button id="logout-button" type="button" style="display: none;">Logout</button>
       </div>
     </header>
 
-    <div id="mode-indicator">Current Mode: Daily</div>
+    <div id="mode-indicator">Mode: Daily</div>
 
     <nav class="mode-selection" aria-label="Game modes">
-      <button id="daily-mode-button" type="button">Word of the Day</button>
-      <button id="random-mode-button" type="button">Random Word</button>
-      <button id="six-letter-mode-button" type="button">6-Letter Word</button>
+      <button id="daily-mode-button" type="button">Daily</button>
+      <button id="random-mode-button" type="button">Random</button>
+      <button id="six-letter-mode-button" type="button">6-Letter</button>
+    </nav>
+
+    <div class="menu-selection">
       <button id="view-leaderboard" type="button">Leaderboard</button>
       <button id="view-achievements" type="button">Achievements</button>
       <button id="open-feedback" type="button">Feedback</button>
-    </nav>
+    </div>
 
     <main role="main">
       <div id="game-board" aria-label="Game board"></div>
       <div id="keyboard" aria-label="On-screen keyboard"></div>
       <section id="statistics">
         <h2>Your Statistics</h2>
+        <div id="stats-summary" class="stats-summary"></div>
         <div id="streak-counter">Current Streak: 0</div>
-        <canvas id="stats-chart" aria-label="Statistics chart"></canvas>
+        <h3 class="chart-title">Guess Distribution</h3>
+        <canvas id="stats-chart" aria-label="Guess distribution chart"></canvas>
       </section>
     </main>
   </div>
@@ -52,9 +66,66 @@
   <div id="name-modal" class="modal" aria-hidden="true">
     <div class="modal-content" role="dialog" aria-labelledby="name-modal-title" aria-modal="true">
       <button class="close" aria-label="Close" type="button">&times;</button>
-      <h2 id="name-modal-title">Enter Your Name</h2>
+      <h2 id="name-modal-title">What should we call you?</h2>
       <input type="text" id="player-name-input" placeholder="Player Name" maxlength="20" autocomplete="nickname">
       <button id="save-name-button" type="button">Save</button>
+    </div>
+  </div>
+
+  <div id="help-modal" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-labelledby="help-modal-title" aria-modal="true">
+      <button class="close" aria-label="Close" type="button">&times;</button>
+      <h2 id="help-modal-title">How To Play</h2>
+      <div class="help-body">
+        <p>Guess the word in 6 tries. Each guess must be a real word.</p>
+        <p>After each guess, the tiles change colour to show how close you were:</p>
+        <div class="help-examples">
+          <div class="help-row">
+            <span class="mini-tile correct">W</span><span class="mini-tile">O</span><span class="mini-tile">R</span><span class="mini-tile">D</span><span class="mini-tile">Y</span>
+            <p><strong>W</strong> is in the word and in the right spot.</p>
+          </div>
+          <div class="help-row">
+            <span class="mini-tile">L</span><span class="mini-tile present">I</span><span class="mini-tile">G</span><span class="mini-tile">H</span><span class="mini-tile">T</span>
+            <p><strong>I</strong> is in the word but in the wrong spot.</p>
+          </div>
+          <div class="help-row">
+            <span class="mini-tile">R</span><span class="mini-tile">O</span><span class="mini-tile">G</span><span class="mini-tile absent">U</span><span class="mini-tile">E</span>
+            <p><strong>U</strong> is not in the word at all.</p>
+          </div>
+        </div>
+        <p><strong>Modes:</strong> <em>Daily</em> is the same word for everyone, once a day. <em>Random</em> and <em>6-Letter</em> are unlimited — hit <em>Play Again</em> as much as you like.</p>
+      </div>
+      <button id="help-got-it" type="button">Let's play!</button>
+    </div>
+  </div>
+
+  <div id="settings-modal" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-labelledby="settings-modal-title" aria-modal="true">
+      <button class="close" aria-label="Close" type="button">&times;</button>
+      <h2 id="settings-modal-title">Settings</h2>
+      <ul class="settings-list">
+        <li class="setting-row">
+          <div class="setting-text">
+            <span class="setting-name">Hard Mode</span>
+            <span class="setting-desc">Revealed hints must be used in later guesses.</span>
+          </div>
+          <label class="switch"><input type="checkbox" id="setting-hard"><span class="slider"></span></label>
+        </li>
+        <li class="setting-row">
+          <div class="setting-text">
+            <span class="setting-name">High Contrast</span>
+            <span class="setting-desc">Colour-blind friendly tiles (orange / blue).</span>
+          </div>
+          <label class="switch"><input type="checkbox" id="setting-contrast"><span class="slider"></span></label>
+        </li>
+        <li class="setting-row">
+          <div class="setting-text">
+            <span class="setting-name">Sound</span>
+            <span class="setting-desc">Play a pop when you reveal a correct letter.</span>
+          </div>
+          <label class="switch"><input type="checkbox" id="setting-sound"><span class="slider"></span></label>
+        </li>
+      </ul>
     </div>
   </div>
 
@@ -100,6 +171,9 @@
       <h2 id="winning-modal-title">Congratulations!</h2>
       <h3 id="winning-word-display"></h3>
       <div id="word-definition"></div>
+      <div class="modal-actions">
+        <button id="play-again-button" class="modal-button" type="button">Play Again</button>
+      </div>
       <div class="share-buttons">
         <button id="copy-result-button" type="button">Copy Result</button>
         <button id="share-whatsapp-button" type="button">WhatsApp</button>
@@ -113,6 +187,7 @@
     <div class="modal-content" role="dialog" aria-labelledby="auth-modal-title" aria-modal="true">
       <button class="close" aria-label="Close" type="button">&times;</button>
       <h2 id="auth-modal-title">Login / Sign Up</h2>
+      <p class="modal-note">Optional — your stats are saved on this device either way. Log in to post scores to the online leaderboard.</p>
       <button id="email-signin-button" type="button">Sign in with Email</button>
       <button id="email-signup-button" type="button">Sign up with Email</button>
     </div>

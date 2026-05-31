@@ -10,7 +10,15 @@
     SHAKE_MS: 500,
     CONFETTI_MS: 5000,
     TOAST_MS: 2500,
+    DAILY_EPOCH: new Date(2022, 0, 1).getTime(),
+    RECENT_MAX: 100,
     MODES: { DAILY: 'daily', RANDOM: 'random', SIX: 'six-letter' },
+    LS: {
+      STATS: 'wu_stats', ACH: 'wu_ach', HARD: 'wu_hard', SOUND: 'wu_sound',
+      CONTRAST: 'wu_contrast', GAME: 'wu_game', RECENT: 'wu_recent',
+      NAME: 'playerName', DAILY_DONE: 'dailyAttempted', LAST_DAILY: 'lastDailyWord',
+      SEEN_HELP: 'wu_seen_help',
+    },
     FIREBASE: {
       apiKey: 'AIzaSyApXW3PWhqhQ0mXeIG1oo5mdawQD29Xxjs',
       authDomain: 'wordle-upgrade-c055f.firebaseapp.com',
@@ -32,8 +40,8 @@
     gameActive: false,
     startTime: null,
     playerName: '',
-    validWordsSet: new Set(),
-    wordsByLength: new Map(),
+    answersByLength: new Map(),
+    validByLength: new Map(),
     currentMode: CONFIG.MODES.DAILY,
     correctPositions: [],
     userId: null,
@@ -41,7 +49,12 @@
     wordListPromise: null,
     leaderboardTabsBound: false,
     animating: false,
+    loading: false,
     statsChart: null,
+    hardMode: false,
+    soundOn: true,
+    lastResult: null,
+    popAudio: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -51,55 +64,116 @@
     return new Date().toLocaleDateString('en-CA');
   }
 
+  function dailyIndex() {
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    return Math.floor((midnight - CONFIG.DAILY_EPOCH) / 86400000);
+  }
+
   function sanitize(str) {
     const t = document.createElement('div');
     t.textContent = String(str ?? '');
     return t.innerHTML;
   }
 
+  function readJSON(key, fallback) {
+    try {
+      const v = JSON.parse(localStorage.getItem(key));
+      return v == null ? fallback : v;
+    } catch {
+      return fallback;
+    }
+  }
+
+  // ---- Word list loading (two-list system) ----
+  function parseWords(text) {
+    return text.split(/\r?\n/).map((w) => w.trim().toLowerCase()).filter((w) => /^[a-z]+$/.test(w));
+  }
+
   function loadWordList() {
     if (state.wordListPromise) return state.wordListPromise;
-    state.wordListPromise = fetch('words_en.txt')
-      .then((r) => {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+    const files = [
+      ['words/answers_5.txt', 'a', 5],
+      ['words/guesses_5.txt', 'v', 5],
+      ['words/answers_6.txt', 'a', 6],
+      ['words/guesses_6.txt', 'v', 6],
+    ];
+    state.wordListPromise = Promise.all(
+      files.map(([path]) => fetch(path).then((r) => {
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + path);
         return r.text();
-      })
-      .then((text) => {
-        const words = text
-          .split(/\r?\n/)
-          .map((w) => w.trim().toLowerCase())
-          .filter((w) => /^[a-z]+$/.test(w));
-        state.validWordsSet = new Set(words);
-        const byLen = new Map();
-        for (const w of words) {
-          if (!byLen.has(w.length)) byLen.set(w.length, []);
-          byLen.get(w.length).push(w);
-        }
-        state.wordsByLength = byLen;
-      })
-      .catch((err) => {
-        console.error('Word list load failed:', err);
-        toast('Could not load word list. Try refreshing.', 'error');
-        state.wordListPromise = null;
-        throw err;
+      }))
+    ).then((texts) => {
+      texts.forEach((text, i) => {
+        const [, kind, len] = files[i];
+        const words = parseWords(text);
+        if (kind === 'a') state.answersByLength.set(len, words);
+        else state.validByLength.set(len, new Set(words));
       });
+      // Answers must always be accepted as guesses too.
+      for (const [len, answers] of state.answersByLength) {
+        const set = state.validByLength.get(len) || new Set();
+        answers.forEach((w) => set.add(w));
+        state.validByLength.set(len, set);
+      }
+    }).catch((err) => {
+      console.error('Word list load failed:', err);
+      toast('Could not load word list. Try refreshing.', 'error');
+      state.wordListPromise = null;
+      throw err;
+    });
     return state.wordListPromise;
   }
 
-  function getRandomWord(length) {
-    const list = state.wordsByLength.get(length);
-    if (!list || !list.length) return null;
-    return list[Math.floor(Math.random() * list.length)];
+  function isValidGuess(word) {
+    const set = state.validByLength.get(word.length);
+    return !!set && set.has(word);
+  }
+
+  // mulberry32 — tiny deterministic PRNG for a stable daily shuffle
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function seededShuffle(arr, seed) {
+    const out = arr.slice();
+    const rand = mulberry32(seed);
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
   }
 
   function getDailyWord() {
-    const list = state.wordsByLength.get(CONFIG.DEFAULT_LENGTH);
+    const list = state.answersByLength.get(CONFIG.DEFAULT_LENGTH);
     if (!list || !list.length) return null;
-    const d = new Date();
-    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
-    return list[seed % list.length];
+    const shuffled = seededShuffle(list, 0x5717d1e);
+    const idx = ((dailyIndex() % shuffled.length) + shuffled.length) % shuffled.length;
+    return shuffled[idx];
   }
 
+  function getRandomWord(length) {
+    const list = state.answersByLength.get(length);
+    if (!list || !list.length) return null;
+    const recent = readJSON(CONFIG.LS.RECENT, []);
+    let pick = null;
+    for (let tries = 0; tries < 60; tries++) {
+      pick = list[Math.floor(Math.random() * list.length)];
+      if (!recent.includes(pick)) break;
+    }
+    recent.push(pick);
+    while (recent.length > CONFIG.RECENT_MAX) recent.shift();
+    localStorage.setItem(CONFIG.LS.RECENT, JSON.stringify(recent));
+    return pick;
+  }
+
+  // ---- Modal helpers ----
   function openModal(id) {
     const m = $(id);
     if (!m) return;
@@ -140,21 +214,27 @@
 
   function updateModeIndicator(mode) {
     const label = mode === CONFIG.MODES.SIX ? '6-Letter' : mode.charAt(0).toUpperCase() + mode.slice(1);
-    $('mode-indicator').textContent = `Current Mode: ${label}`;
+    $('mode-indicator').textContent = `Mode: ${label}`;
   }
 
+  // ---- Game lifecycle ----
   async function startGame(mode) {
+    if (state.loading) return;
+    state.loading = true;
     try {
       await loadWordList();
     } catch {
+      state.loading = false;
       return;
     }
+    state.loading = false;
 
-    if (mode === CONFIG.MODES.DAILY && localStorage.getItem('dailyAttempted') === todayISO()) {
+    if (mode === CONFIG.MODES.DAILY && localStorage.getItem(CONFIG.LS.DAILY_DONE) === todayISO()) {
       showDailyAttemptedModal();
       return;
     }
 
+    clearSavedGame();
     state.currentMode = mode;
     state.wordLength = mode === CONFIG.MODES.SIX ? CONFIG.SIX_LETTER_LENGTH : CONFIG.DEFAULT_LENGTH;
     state.targetWord = mode === CONFIG.MODES.DAILY ? getDailyWord() : getRandomWord(state.wordLength);
@@ -179,21 +259,18 @@
   }
 
   function ensurePlayerName() {
-    if (state.userId) {
-      database.ref(`users/${state.userId}/profile/name`).once('value').then((snap) => {
-        state.playerName = snap.val() || '';
-        if (!state.playerName) showNameModal();
-        updateUserDisplay();
-      });
-    } else {
-      state.playerName = localStorage.getItem('playerName') || '';
-      if (!state.playerName) showNameModal();
+    state.playerName = localStorage.getItem(CONFIG.LS.NAME) || '';
+    if (!state.playerName && !localStorage.getItem(CONFIG.LS.SEEN_HELP)) {
+      // first-timers see help first; name prompt only when they post a score
       updateUserDisplay();
+      return;
     }
+    updateUserDisplay();
   }
 
   function showNameModal() {
     openModal('name-modal');
+    $('player-name-input').value = state.playerName || '';
     $('player-name-input').focus();
   }
 
@@ -206,10 +283,9 @@
       return;
     }
     state.playerName = sanitize(value);
+    localStorage.setItem(CONFIG.LS.NAME, state.playerName);
     if (state.userId) {
       database.ref(`users/${state.userId}/profile`).update({ name: state.playerName });
-    } else {
-      localStorage.setItem('playerName', state.playerName);
     }
     closeModal('name-modal');
     updateUserDisplay();
@@ -265,11 +341,18 @@
     if (key === 'enter') {
       if (state.currentGuess.length !== state.wordLength) {
         toast('Not enough letters.', 'warn');
+        shakeCurrentRow();
         return;
       }
-      if (!state.validWordsSet.has(state.currentGuess)) {
-        showInvalidGuess();
+      if (!isValidGuess(state.currentGuess)) {
         toast('Not in word list.', 'warn');
+        shakeCurrentRow();
+        return;
+      }
+      const hardErr = state.hardMode ? hardModeViolation(state.currentGuess) : null;
+      if (hardErr) {
+        toast(hardErr, 'warn', 3000);
+        shakeCurrentRow();
         return;
       }
       submitGuess();
@@ -324,6 +407,33 @@
     return result;
   }
 
+  // Standard hard-mode rules: revealed greens stay put, revealed yellows must be reused.
+  function hardModeViolation(guess) {
+    const greens = {};
+    const required = {};
+    for (const g of state.guesses) {
+      const ev = evaluateGuess(g, state.targetWord);
+      const need = {};
+      for (let i = 0; i < ev.length; i++) {
+        if (ev[i] === 'correct') greens[i] = g[i];
+        if (ev[i] === 'correct' || ev[i] === 'present') need[g[i]] = (need[g[i]] || 0) + 1;
+      }
+      for (const ch in need) required[ch] = Math.max(required[ch] || 0, need[ch]);
+    }
+    for (const pos in greens) {
+      if (guess[pos] !== greens[pos]) {
+        return `Spot ${Number(pos) + 1} must be ${greens[pos].toUpperCase()}.`;
+      }
+    }
+    for (const ch in required) {
+      const count = guess.split('').filter((c) => c === ch).length;
+      if (count < required[ch]) {
+        return `Guess must contain ${ch.toUpperCase()}.`;
+      }
+    }
+    return null;
+  }
+
   function submitGuess() {
     state.animating = true;
     const board = $('game-board');
@@ -358,6 +468,8 @@
       } else if (state.guesses.length >= CONFIG.MAX_GUESSES) {
         state.gameActive = false;
         endGame(false);
+      } else {
+        saveGame();
       }
     }, totalDelay);
   }
@@ -377,22 +489,34 @@
     }
   }
 
+  function shakeCurrentRow() {
+    const row = $('game-board').children[state.guesses.length];
+    if (!row) return;
+    [...row.children].forEach((tile) => tile.classList.add('invalid'));
+    setTimeout(() => {
+      [...row.children].forEach((tile) => tile.classList.remove('invalid'));
+    }, CONFIG.SHAKE_MS);
+  }
+
   function endGame(won) {
-    logResult(won, state.currentMode);
-    updateAchievements();
+    const attempts = state.guesses.length;
+    const stats = recordGame(won, attempts);
+    updateAchievements(stats);
+    clearSavedGame();
+    if (state.userId) {
+      writeLeaderboard(won, attempts);
+      syncStatsToFirebase(stats);
+    }
     if (state.currentMode === CONFIG.MODES.DAILY) {
-      localStorage.setItem('dailyAttempted', todayISO());
-      localStorage.setItem('lastDailyWord', state.targetWord);
+      localStorage.setItem(CONFIG.LS.DAILY_DONE, todayISO());
+      localStorage.setItem(CONFIG.LS.LAST_DAILY, state.targetWord);
     }
-    if (won) {
-      showWinningAnimation();
-    } else {
-      toast(`The word was ${state.targetWord.toUpperCase()}.`, 'info', 5000);
-    }
+    displayStatistics();
+    showResultModal(won);
   }
 
   function showDailyAttemptedModal() {
-    const lastWord = localStorage.getItem('lastDailyWord') || '';
+    const lastWord = localStorage.getItem(CONFIG.LS.LAST_DAILY) || '';
     const content = $('daily-attempt-content');
     content.innerHTML = `
       <p>You've already played today's word. Come back tomorrow!</p>
@@ -409,14 +533,113 @@
   }
 
   function playPopSound() {
+    if (!state.soundOn) return;
     try {
-      const audio = new Audio('pop-sound.mp3');
-      audio.volume = 0.4;
-      audio.play().catch(() => {});
+      if (!state.popAudio) {
+        state.popAudio = new Audio('pop-sound.mp3');
+        state.popAudio.volume = 0.4;
+      }
+      state.popAudio.currentTime = 0;
+      state.popAudio.play().catch(() => {});
     } catch {}
   }
 
-  function logResult(won, mode) {
+  // ---- Local-first stats ----
+  function defaultStats() {
+    return { gamesPlayed: 0, gamesWon: 0, currentStreak: 0, maxStreak: 0, guessDist: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 } };
+  }
+
+  function loadStats() {
+    const s = readJSON(CONFIG.LS.STATS, null);
+    if (!s) return defaultStats();
+    const d = defaultStats();
+    return {
+      gamesPlayed: s.gamesPlayed || 0,
+      gamesWon: s.gamesWon || 0,
+      currentStreak: s.currentStreak || 0,
+      maxStreak: s.maxStreak || 0,
+      guessDist: Object.assign(d.guessDist, s.guessDist || {}),
+    };
+  }
+
+  function recordGame(won, attempts) {
+    const s = loadStats();
+    s.gamesPlayed += 1;
+    if (won) {
+      s.gamesWon += 1;
+      s.currentStreak += 1;
+      if (s.currentStreak > s.maxStreak) s.maxStreak = s.currentStreak;
+      if (attempts >= 1 && attempts <= 6) s.guessDist[attempts] = (s.guessDist[attempts] || 0) + 1;
+    } else {
+      s.currentStreak = 0;
+    }
+    localStorage.setItem(CONFIG.LS.STATS, JSON.stringify(s));
+    state.currentStreak = s.currentStreak;
+    state.lastResult = won ? { attempts } : null;
+    return s;
+  }
+
+  function displayStatistics() {
+    const stats = loadStats();
+    state.currentStreak = stats.currentStreak || 0;
+    $('streak-counter').textContent = `Current Streak: ${state.currentStreak} 🔥`;
+
+    const winPct = stats.gamesPlayed > 0 ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
+    const summary = $('stats-summary');
+    if (summary) {
+      summary.innerHTML = '';
+      [
+        ['Played', stats.gamesPlayed],
+        ['Win %', winPct],
+        ['Max Streak', stats.maxStreak],
+      ].forEach(([label, value]) => {
+        const box = document.createElement('div');
+        box.className = 'stat-box';
+        box.innerHTML = `<span class="stat-num">${value}</span><span class="stat-label">${label}</span>`;
+        summary.appendChild(box);
+      });
+    }
+    renderGuessChart(stats);
+  }
+
+  function renderGuessChart(stats) {
+    const canvas = $('stats-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const labels = ['1', '2', '3', '4', '5', '6'];
+    const data = labels.map((n) => stats.guessDist[n] || 0);
+    const latest = state.lastResult ? state.lastResult.attempts : null;
+    const css = getComputedStyle(document.documentElement);
+    const correct = css.getPropertyValue('--correct').trim() || '#538d4e';
+    const idle = css.getPropertyValue('--border-strong').trim() || '#565758';
+    const colors = labels.map((n) => (Number(n) === latest ? correct : idle));
+
+    if (state.statsChart) state.statsChart.destroy();
+    state.statsChart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 4 }] },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { beginAtZero: true, ticks: { precision: 0, color: '#d7dadc' }, grid: { display: false } },
+          y: { ticks: { color: '#d7dadc' }, grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  function syncStatsToFirebase(stats) {
+    if (!state.userId) return;
+    database.ref(`users/${state.userId}/stats`).update({
+      gamesPlayed: stats.gamesPlayed,
+      gamesWon: stats.gamesWon,
+      currentStreak: stats.currentStreak,
+      maxStreak: stats.maxStreak,
+    }).catch((err) => console.error('Stats sync failed:', err));
+  }
+
+  function writeLeaderboard(won, attempts) {
     const timeTaken = Math.floor((Date.now() - state.startTime) / 1000);
     const today = todayISO();
     const log = {
@@ -424,35 +647,32 @@
       time: new Date().toLocaleString(),
       date: today,
       timeTaken,
-      attempts: state.guesses.length,
+      attempts,
       word: state.targetWord.toUpperCase(),
       won,
     };
-    if (state.userId) {
-      database.ref(`leaderboard/${mode}/${today}/${Date.now()}`).set(log).catch((err) => {
-        console.error('Leaderboard write failed:', err);
-        toast('Could not save result.', 'error');
-      });
-      updateUserStats(won, state.guesses.length);
+    database.ref(`leaderboard/${state.currentMode}/${today}/${Date.now()}`).set(log).catch((err) => {
+      console.error('Leaderboard write failed:', err);
+    });
+  }
+
+  // ---- Result modal (win or loss) ----
+  function showResultModal(won) {
+    const title = $('winning-modal-title');
+    const wordDisplay = $('winning-word-display');
+    if (won) {
+      title.textContent = pickWinTitle(state.guesses.length);
+      wordDisplay.textContent = `${state.targetWord.toUpperCase()} in ${state.guesses.length} ${state.guesses.length === 1 ? 'try' : 'tries'}`;
+    } else {
+      title.textContent = 'So close!';
+      wordDisplay.textContent = `The word was ${state.targetWord.toUpperCase()}`;
     }
-  }
-
-  function showInvalidGuess() {
-    const row = $('game-board').children[state.guesses.length];
-    if (!row) return;
-    [...row.children].forEach((tile) => tile.classList.add('invalid'));
-    setTimeout(() => {
-      [...row.children].forEach((tile) => tile.classList.remove('invalid'));
-    }, CONFIG.SHAKE_MS);
-  }
-
-  function showWinningAnimation() {
     openModal('winning-modal');
-    $('winning-word-display').textContent = `You guessed: ${state.targetWord.toUpperCase()}`;
-    $('word-definition').innerHTML = '<em>Loading definition…</em>';
+
+    const def = $('word-definition');
+    def.innerHTML = '<em>Loading definition…</em>';
     fetchWordDefinition(state.targetWord)
       .then((details) => {
-        const def = $('word-definition');
         def.innerHTML = '';
         const header = document.createElement('strong');
         header.textContent = 'Definition:';
@@ -466,10 +686,13 @@
           def.appendChild(document.createElement('br'));
         });
       })
-      .catch(() => {
-        $('word-definition').innerHTML = '<em>Definition not available.</em>';
-      });
-    triggerConfetti();
+      .catch(() => { def.innerHTML = '<em>Definition not available.</em>'; });
+
+    if (won) triggerConfetti();
+  }
+
+  function pickWinTitle(attempts) {
+    return ['Genius!', 'Magnificent!', 'Impressive!', 'Splendid!', 'Great!', 'Phew!'][Math.min(attempts, 6) - 1] || 'You got it!';
   }
 
   function triggerConfetti() {
@@ -490,14 +713,17 @@
     const data = await res.json();
     return data[0].meanings.map((m) => ({
       partOfSpeech: m.partOfSpeech,
-      definitions: m.definitions.map((d) => d.definition),
+      definitions: m.definitions.map((d) => d.definition).slice(0, 2),
     }));
   }
 
   function generateShareText() {
     const timeTaken = Math.floor((Date.now() - state.startTime) / 1000);
     const modeLabel = state.currentMode === CONFIG.MODES.SIX ? '6-Letter' : state.currentMode.charAt(0).toUpperCase() + state.currentMode.slice(1);
-    let txt = `Wordle Upgrade — ${modeLabel}\n${state.guesses.length}/${CONFIG.MAX_GUESSES} in ${timeTaken}s\n\n`;
+    const won = state.guesses[state.guesses.length - 1] === state.targetWord;
+    const score = won ? state.guesses.length : 'X';
+    const hard = state.hardMode ? '*' : '';
+    let txt = `Wordle Upgrade — ${modeLabel}\n${score}/${CONFIG.MAX_GUESSES}${hard} in ${timeTaken}s\n\n`;
     state.guesses.forEach((guess) => {
       const ev = evaluateGuess(guess, state.targetWord);
       txt += ev.map((s) => (s === 'correct' ? '🟩' : s === 'present' ? '🟨' : '⬛')).join('') + '\n';
@@ -505,73 +731,78 @@
     return txt;
   }
 
-  function updateUserStats(won, attempts) {
-    if (!state.userId) return;
-    const statsRef = database.ref(`users/${state.userId}/stats`);
-    statsRef.transaction((s) => {
-      if (s === null) {
-        state.currentStreak = won ? 1 : 0;
-        return {
-          gamesPlayed: 1,
-          gamesWon: won ? 1 : 0,
-          currentStreak: state.currentStreak,
-          maxStreak: state.currentStreak,
-          totalAttempts: won ? attempts : 0,
-        };
+  // ---- Save & resume ----
+  function saveGame() {
+    if (!state.gameActive) return;
+    const payload = {
+      mode: state.currentMode,
+      wordLength: state.wordLength,
+      targetWord: state.targetWord,
+      guesses: state.guesses,
+      hardMode: state.hardMode,
+      startTime: state.startTime,
+      date: todayISO(),
+    };
+    try { localStorage.setItem(CONFIG.LS.GAME, JSON.stringify(payload)); } catch {}
+  }
+
+  function clearSavedGame() {
+    localStorage.removeItem(CONFIG.LS.GAME);
+  }
+
+  function resumeGame() {
+    const saved = readJSON(CONFIG.LS.GAME, null);
+    if (!saved || !saved.targetWord || !Array.isArray(saved.guesses)) return false;
+    if (!saved.guesses.length || saved.guesses.length >= CONFIG.MAX_GUESSES) return false;
+    if (saved.guesses[saved.guesses.length - 1] === saved.targetWord) return false;
+    if (saved.mode === CONFIG.MODES.DAILY && saved.date !== todayISO()) { clearSavedGame(); return false; }
+
+    state.currentMode = saved.mode;
+    state.wordLength = saved.wordLength;
+    state.targetWord = saved.targetWord;
+    state.guesses = saved.guesses.slice();
+    state.hardMode = !!saved.hardMode;
+    state.startTime = saved.startTime || Date.now();
+    state.currentGuess = '';
+    state.correctPositions = new Array(state.wordLength).fill(false);
+    state.gameActive = true;
+    state.animating = false;
+
+    updateModeIndicator(state.currentMode);
+    ensurePlayerName();
+    createBoard();
+    createKeyboard();
+    renderResumedGuesses();
+    toast('Resumed your game.', 'info', 1800);
+    return true;
+  }
+
+  function renderResumedGuesses() {
+    const board = $('game-board');
+    state.guesses.forEach((guess, r) => {
+      const row = board.children[r];
+      const ev = evaluateGuess(guess, state.targetWord);
+      for (let i = 0; i < state.wordLength; i++) {
+        const tile = row.children[i];
+        tile.textContent = guess[i].toUpperCase();
+        tile.classList.add(ev[i]);
+        if (ev[i] === 'correct') state.correctPositions[i] = true;
+        updateKeyColor(guess[i], ev[i]);
       }
-      s.gamesPlayed += 1;
-      if (won) {
-        s.gamesWon += 1;
-        s.currentStreak = (s.currentStreak || 0) + 1;
-        if (s.currentStreak > (s.maxStreak || 0)) s.maxStreak = s.currentStreak;
-        s.totalAttempts = (s.totalAttempts || 0) + attempts;
-      } else {
-        s.currentStreak = 0;
-      }
-      state.currentStreak = s.currentStreak;
-      return s;
-    }).then(() => {
-      $('streak-counter').textContent = `Current Streak: ${state.currentStreak}`;
-      displayStatistics();
     });
   }
 
-  function displayStatistics() {
-    if (!state.userId) return;
-    database.ref(`users/${state.userId}/stats`).once('value').then((snap) => {
-      const stats = snap.val();
-      if (!stats) return;
-      const winPct = stats.gamesPlayed > 0 ? ((stats.gamesWon / stats.gamesPlayed) * 100).toFixed(1) : 0;
-      const avgAttempts = stats.gamesWon > 0 ? (stats.totalAttempts / stats.gamesWon).toFixed(2) : 0;
-      state.currentStreak = stats.currentStreak || 0;
-      $('streak-counter').textContent = `Current Streak: ${state.currentStreak}`;
-      const ctx = $('stats-chart').getContext('2d');
-      if (state.statsChart) state.statsChart.destroy();
-      state.statsChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: ['Games Played', 'Win %', 'Avg Attempts'],
-          datasets: [{
-            label: 'Statistics',
-            data: [stats.gamesPlayed, winPct, avgAttempts],
-            backgroundColor: ['#538D4E', '#B59F3B', '#3A3A3C'],
-          }],
-        },
-        options: { responsive: true, scales: { y: { beginAtZero: true } } },
-      });
-    });
-  }
-
+  // ---- User display / auth ----
   function updateUserDisplay() {
     const userDisplay = $('user-display');
     const loginBtn = $('login-button');
     const logoutBtn = $('logout-button');
     if (state.userId) {
-      userDisplay.textContent = 'Logged in as: ' + (state.playerName || 'Player');
+      userDisplay.textContent = state.playerName || 'Player';
       logoutBtn.style.display = 'inline-block';
       loginBtn.style.display = 'none';
     } else {
-      userDisplay.textContent = state.playerName ? `Playing as: ${state.playerName}` : 'Not logged in';
+      userDisplay.textContent = state.playerName ? state.playerName : 'Guest';
       logoutBtn.style.display = 'none';
       loginBtn.style.display = 'inline-block';
     }
@@ -610,9 +841,7 @@
     container.innerHTML = '<p class="loading">Loading leaderboard…</p>';
     const selectedDate = $('leaderboard-date').value;
     database.ref(`leaderboard/${mode}`).once('value')
-      .then((snap) => {
-        renderLeaderboard(snap.val(), mode, selectedDate, container);
-      })
+      .then((snap) => renderLeaderboard(snap.val(), mode, selectedDate, container))
       .catch((err) => {
         console.error('Leaderboard fetch failed:', err);
         container.innerHTML = '<p>Error loading leaderboard. Try again later.</p>';
@@ -673,48 +902,50 @@
     container.appendChild(table);
   }
 
-  function updateAchievements() {
-    if (!state.userId) return;
-    const achievementsRef = database.ref(`users/${state.userId}/achievements`);
-    const statsRef = database.ref(`users/${state.userId}/stats`);
-    Promise.all([achievementsRef.once('value'), statsRef.once('value')])
-      .then(([aSnap, sSnap]) => {
-        const ach = aSnap.val() || {};
-        const stats = sSnap.val() || {};
-        const newly = [];
-        const check = (key, condition, name) => {
-          if (condition && !ach[key]) {
-            ach[key] = true;
-            newly.push(name);
-          }
-        };
-        check('firstWin', stats.gamesWon >= 1, 'First Win');
-        check('tenWins', stats.gamesWon >= 10, 'Decathlon');
-        check('fiveStreak', (stats.currentStreak || 0) >= 5, 'Hot Streak');
-        check('tenStreak', (stats.maxStreak || 0) >= 10, 'Unstoppable');
-        achievementsRef.set(ach);
-        newly.forEach((n) => toast(`Achievement unlocked: ${n}!`, 'success', 3500));
-      })
-      .catch((err) => console.error('Achievements update failed:', err));
+  // ---- Achievements (local-first) ----
+  const ACHIEVEMENTS = [
+    { key: 'firstWin', name: 'First Win', desc: 'Win your first game' },
+    { key: 'ace', name: 'Hole in One', desc: 'Win in a single guess' },
+    { key: 'eagle', name: 'Eagle Eye', desc: 'Win in two guesses' },
+    { key: 'tenWins', name: 'Decathlon', desc: 'Win 10 games' },
+    { key: 'fiftyWins', name: 'Centurion', desc: 'Win 50 games' },
+    { key: 'fiveStreak', name: 'Hot Streak', desc: '5-game winning streak' },
+    { key: 'tenStreak', name: 'Unstoppable', desc: '10-game winning streak' },
+  ];
+
+  function loadAch() { return readJSON(CONFIG.LS.ACH, {}); }
+
+  function updateAchievements(stats) {
+    const ach = loadAch();
+    const newly = [];
+    const check = (key, condition, name) => {
+      if (condition && !ach[key]) { ach[key] = true; newly.push(name); }
+    };
+    check('firstWin', stats.gamesWon >= 1, 'First Win');
+    check('ace', (stats.guessDist[1] || 0) >= 1, 'Hole in One');
+    check('eagle', (stats.guessDist[2] || 0) >= 1, 'Eagle Eye');
+    check('tenWins', stats.gamesWon >= 10, 'Decathlon');
+    check('fiftyWins', stats.gamesWon >= 50, 'Centurion');
+    check('fiveStreak', (stats.currentStreak || 0) >= 5, 'Hot Streak');
+    check('tenStreak', (stats.maxStreak || 0) >= 10, 'Unstoppable');
+    localStorage.setItem(CONFIG.LS.ACH, JSON.stringify(ach));
+    if (state.userId) database.ref(`users/${state.userId}/achievements`).update(ach).catch(() => {});
+    newly.forEach((n) => toast(`Achievement unlocked: ${n}!`, 'success', 3500));
   }
 
-  function displayAchievements(achievements) {
+  function displayAchievements() {
+    const achievements = loadAch();
     const list = $('achievements-list');
     list.innerHTML = '';
-    const items = [
-      { key: 'firstWin', name: 'First Win', desc: 'Win your first game' },
-      { key: 'tenWins', name: 'Decathlon', desc: 'Win 10 games' },
-      { key: 'fiveStreak', name: 'Hot Streak', desc: '5-game winning streak' },
-      { key: 'tenStreak', name: 'Unstoppable', desc: '10-game winning streak' },
-    ];
-    items.forEach((item) => {
+    ACHIEVEMENTS.forEach((item) => {
       const li = document.createElement('li');
-      li.className = 'achievement' + (achievements[item.key] ? ' unlocked' : '');
+      const unlocked = !!achievements[item.key];
+      li.className = 'achievement' + (unlocked ? ' unlocked' : '');
       const icon = document.createElement('span');
       icon.className = 'achievement-icon';
-      icon.textContent = achievements[item.key] ? '★' : '☆';
+      icon.textContent = unlocked ? '★' : '☆';
       const text = document.createElement('span');
-      text.textContent = `${item.name} — ${achievements[item.key] ? item.desc : 'Locked'}`;
+      text.textContent = `${item.name} — ${item.desc}`;
       li.appendChild(icon);
       li.appendChild(text);
       list.appendChild(li);
@@ -729,7 +960,7 @@
       return;
     }
     database.ref('feedback').push({
-      user: state.userId ? state.playerName : 'Anonymous',
+      user: state.playerName || 'Anonymous',
       feedback: text,
       timestamp: firebase.database.ServerValue.TIMESTAMP,
     }).then(() => {
@@ -742,18 +973,53 @@
     });
   }
 
+  // ---- Settings ----
+  function applySettings() {
+    state.hardMode = localStorage.getItem(CONFIG.LS.HARD) === '1';
+    state.soundOn = localStorage.getItem(CONFIG.LS.SOUND) !== '0';
+    const contrast = localStorage.getItem(CONFIG.LS.CONTRAST) === '1';
+    document.documentElement.classList.toggle('high-contrast', contrast);
+    if ($('setting-hard')) $('setting-hard').checked = state.hardMode;
+    if ($('setting-contrast')) $('setting-contrast').checked = contrast;
+    if ($('setting-sound')) $('setting-sound').checked = state.soundOn;
+  }
+
+  function bindSettings() {
+    $('open-settings').addEventListener('click', () => { applySettings(); openModal('settings-modal'); });
+    $('setting-hard').addEventListener('change', (e) => {
+      if (state.gameActive && state.guesses.length > 0) {
+        e.target.checked = state.hardMode;
+        toast('Finish this game before changing Hard Mode.', 'warn', 3000);
+        return;
+      }
+      state.hardMode = e.target.checked;
+      localStorage.setItem(CONFIG.LS.HARD, state.hardMode ? '1' : '0');
+    });
+    $('setting-contrast').addEventListener('change', (e) => {
+      localStorage.setItem(CONFIG.LS.CONTRAST, e.target.checked ? '1' : '0');
+      document.documentElement.classList.toggle('high-contrast', e.target.checked);
+    });
+    $('setting-sound').addEventListener('change', (e) => {
+      state.soundOn = e.target.checked;
+      localStorage.setItem(CONFIG.LS.SOUND, state.soundOn ? '1' : '0');
+    });
+  }
+
+  // ---- Auth UI ----
   function bindAuthUI() {
     auth.onAuthStateChanged((user) => {
       if (user) {
         state.userId = user.uid;
-        state.playerName = user.displayName || (user.email ? user.email.split('@')[0] : 'Player');
-        localStorage.setItem('playerName', state.playerName);
+        const name = user.displayName || (user.email ? user.email.split('@')[0] : 'Player');
+        state.playerName = state.playerName || name;
+        localStorage.setItem(CONFIG.LS.NAME, state.playerName);
         closeModal('auth-modal');
         closeModal('email-auth-modal');
-        displayStatistics();
+        const local = loadStats();
+        if (local.gamesPlayed > 0) syncStatsToFirebase(local);
       } else {
         state.userId = null;
-        state.playerName = localStorage.getItem('playerName') || '';
+        state.playerName = localStorage.getItem(CONFIG.LS.NAME) || '';
       }
       updateUserDisplay();
     });
@@ -785,10 +1051,7 @@
       const intent = $('email-auth-modal').dataset.intent || 'signin';
       const fn = intent === 'signup' ? auth.createUserWithEmailAndPassword : auth.signInWithEmailAndPassword;
       fn.call(auth, email, password)
-        .then(() => {
-          $('user-email').value = '';
-          $('user-password').value = '';
-        })
+        .then(() => { $('user-email').value = ''; $('user-password').value = ''; })
         .catch((err) => {
           toast(friendlyAuthError(err), 'error', 4000);
           console.error('Auth error:', err);
@@ -842,24 +1105,26 @@
     $('random-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.RANDOM));
     $('six-letter-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.SIX));
     $('view-leaderboard').addEventListener('click', viewLeaderboard);
-    $('view-achievements').addEventListener('click', () => {
-      if (!state.userId) {
-        toast('Log in to view achievements.', 'warn');
-        return;
-      }
-      database.ref(`users/${state.userId}/achievements`).once('value')
-        .then((snap) => displayAchievements(snap.val() || {}))
-        .catch((err) => console.error('Achievements fetch failed:', err));
-    });
+    $('view-achievements').addEventListener('click', displayAchievements);
     $('open-feedback').addEventListener('click', () => openModal('feedback-modal'));
     $('submit-feedback').addEventListener('click', submitFeedback);
     $('save-name-button').addEventListener('click', saveName);
     $('player-name-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        saveName();
-      }
+      if (e.key === 'Enter') { e.preventDefault(); saveName(); }
     });
+
+    $('open-help').addEventListener('click', () => openModal('help-modal'));
+    $('help-got-it').addEventListener('click', () => {
+      localStorage.setItem(CONFIG.LS.SEEN_HELP, '1');
+      closeModal('help-modal');
+    });
+
+    $('play-again-button').addEventListener('click', () => {
+      closeModal('winning-modal');
+      const next = state.currentMode === CONFIG.MODES.DAILY ? CONFIG.MODES.RANDOM : state.currentMode;
+      startGame(next);
+    });
+
     $('share-button').addEventListener('click', () => {
       const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(generateShareText())}`;
       window.open(url, '_blank', 'noopener');
@@ -868,25 +1133,36 @@
       const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(generateShareText())}`;
       window.open(url, '_blank', 'noopener');
     });
-    const copyBtn = $('copy-result-button');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(generateShareText());
-          toast('Result copied to clipboard!', 'success');
-        } catch {
-          toast('Could not copy to clipboard.', 'error');
-        }
-      });
+    $('copy-result-button').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(generateShareText());
+        toast('Result copied to clipboard!', 'success');
+      } catch {
+        toast('Could not copy to clipboard.', 'error');
+      }
+    });
+  }
+
+  function maybeShowHelp() {
+    if (!localStorage.getItem(CONFIG.LS.SEEN_HELP)) {
+      openModal('help-modal');
     }
   }
 
   function init() {
+    applySettings();
     bindAuthUI();
     bindModalCloseUI();
     bindPhysicalKeyboard();
+    bindSettings();
     bindUI();
-    loadWordList().then(() => startGame(CONFIG.MODES.DAILY)).catch(() => {});
+    displayStatistics();
+    maybeShowHelp();
+
+    loadWordList().then(() => {
+      if (!resumeGame()) startGame(CONFIG.MODES.DAILY);
+    }).catch(() => {});
+
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('service-worker.js').catch((err) => {
         console.warn('Service worker registration failed:', err);

@@ -1,12 +1,18 @@
-const CACHE_NAME = 'wordle-upgrade-cache-v3';
+const CACHE_NAME = 'wordle-upgrade-cache-v4';
 const ASSETS = [
   './',
   'index.html',
   'style.css',
   'script.js',
-  'words_en.txt',
+  'words/answers_5.txt',
+  'words/guesses_5.txt',
+  'words/answers_6.txt',
+  'words/guesses_6.txt',
   'manifest.json',
   'pop-sound.mp3',
+  'icons/icon.svg',
+  'icons/icon-192.png',
+  'icons/icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {

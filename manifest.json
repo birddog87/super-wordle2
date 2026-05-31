@@ -1,10 +1,17 @@
 {
   "short_name": "Wordle Upgrade",
   "name": "Wordle Upgrade",
-  "icons": [],
+  "description": "A polished, offline-friendly Wordle game with daily, random and 6-letter modes.",
+  "icons": [
+    { "src": "icons/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "icons/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "icons/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ],
   "start_url": "./index.html",
   "background_color": "#121213",
   "display": "standalone",
+  "orientation": "portrait",
   "scope": "./",
   "theme_color": "#121213"
 }
