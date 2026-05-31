@@ -54,7 +54,9 @@
     hardMode: false,
     soundOn: true,
     lastResult: null,
-    popAudio: null,
+    audioCtx: null,
+    popBuffer: null,
+    popBytesPromise: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -369,6 +371,7 @@
 
   function handleKeyPress(rawKey) {
     if (!state.gameActive || state.animating) return;
+    ensureAudio();
     flashKey(rawKey);
     const key = rawKey.toLowerCase();
     if (key === 'enter') {
@@ -480,9 +483,11 @@
       tile.classList.add('flip');
       setTimeout(() => {
         tile.classList.add(evaluation[i]);
-        if (evaluation[i] === 'correct' && !state.correctPositions[i]) {
-          state.correctPositions[i] = true;
-          tile.classList.add('correct-first-time');
+        if (evaluation[i] === 'correct') {
+          if (!state.correctPositions[i]) {
+            state.correctPositions[i] = true;
+            tile.classList.add('correct-first-time');
+          }
           playPopSound();
         }
         updateKeyColor(state.currentGuess[i], evaluation[i]);
@@ -583,15 +588,49 @@
     openModal('daily-attempt-modal');
   }
 
+  // Web Audio: decode the pop once, then fire a fresh source per reveal so
+  // rapid, overlapping pops never get dropped and start with no latency.
+  function prefetchPopBytes() {
+    if (state.popBytesPromise) return state.popBytesPromise;
+    state.popBytesPromise = fetch('pop-sound.mp3')
+      .then((r) => r.arrayBuffer())
+      .catch(() => null);
+    return state.popBytesPromise;
+  }
+
+  // Must be called from a user gesture to satisfy autoplay policy.
+  function ensureAudio() {
+    try {
+      if (!state.audioCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        state.audioCtx = new Ctx();
+      }
+      if (state.audioCtx.state === 'suspended') state.audioCtx.resume().catch(() => {});
+      if (!state.popBuffer) {
+        prefetchPopBytes().then((bytes) => {
+          if (!bytes || state.popBuffer) return;
+          // slice() because decodeAudioData detaches the buffer
+          state.audioCtx.decodeAudioData(bytes.slice(0)).then((decoded) => {
+            state.popBuffer = decoded;
+          }).catch(() => {});
+        });
+      }
+    } catch {}
+  }
+
   function playPopSound() {
     if (!state.soundOn) return;
+    const ctx = state.audioCtx;
+    if (!ctx || !state.popBuffer) return;
     try {
-      if (!state.popAudio) {
-        state.popAudio = new Audio('pop-sound.mp3');
-        state.popAudio.volume = 0.4;
-      }
-      state.popAudio.currentTime = 0;
-      state.popAudio.play().catch(() => {});
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      const src = ctx.createBufferSource();
+      src.buffer = state.popBuffer;
+      const gain = ctx.createGain();
+      gain.gain.value = 0.4;
+      src.connect(gain).connect(ctx.destination);
+      src.start();
     } catch {}
   }
 
@@ -1059,6 +1098,7 @@
     $('setting-sound').addEventListener('change', (e) => {
       state.soundOn = e.target.checked;
       localStorage.setItem(CONFIG.LS.SOUND, state.soundOn ? '1' : '0');
+      if (state.soundOn) ensureAudio();
     });
   }
 
@@ -1215,6 +1255,12 @@
     bindUI();
     displayStatistics();
     maybeShowHelp();
+
+    // Prime audio: prefetch the clip now, unlock/decode on the first gesture.
+    prefetchPopBytes();
+    ['pointerdown', 'keydown'].forEach((ev) =>
+      document.addEventListener(ev, ensureAudio, { passive: true })
+    );
 
     loadWordList().then(() => {
       if (!resumeGame()) startGame(CONFIG.MODES.DAILY);
