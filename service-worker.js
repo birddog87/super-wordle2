@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wordle-upgrade-cache-v6';
+const CACHE_NAME = 'wordle-upgrade-cache-v7';
 const ASSETS = [
   './',
   'index.html',

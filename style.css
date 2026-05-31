@@ -450,14 +450,6 @@ h2, h3 { margin: 0 0 16px 0; }
 #winning-modal .modal-content { overflow: hidden; }
 #winning-modal-title { font-size: 1.6rem; }
 #winning-word-display { font-size: 1.05rem; color: var(--fg-muted); font-weight: 600; }
-#confetti-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: -1;
-}
 #word-definition {
   margin: 16px 0;
   font-size: 0.95rem;

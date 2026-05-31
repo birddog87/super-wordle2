@@ -8,7 +8,6 @@
     FLIP_STEP_MS: 300,
     FLIP_DURATION_MS: 500,
     SHAKE_MS: 500,
-    CONFETTI_MS: 5000,
     TOAST_MS: 2500,
     DAILY_EPOCH: new Date(2022, 0, 1).getTime(),
     RECENT_MAX: 100,
@@ -792,15 +791,21 @@
   }
 
   function triggerConfetti() {
-    if (typeof confetti === 'undefined') return;
-    const canvas = $('confetti-canvas');
-    const myConfetti = confetti.create(canvas, { resize: true, useWorker: true });
-    const end = Date.now() + CONFIG.CONFETTI_MS;
-    (function frame() {
-      myConfetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: Math.random() } });
-      myConfetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: Math.random() } });
-      if (Date.now() < end) requestAnimationFrame(frame);
-    })();
+    if (typeof confetti === 'undefined' || reduceMotion()) return;
+    // A few gentle, gravity-driven bursts — not a continuous strobe.
+    const colors = ['#538d4e', '#6aaa64', '#b59f3b', '#f7f8f4'];
+    const base = {
+      spread: 70,
+      startVelocity: 42,
+      gravity: 0.9,
+      ticks: 220,
+      zIndex: 1500,
+      colors,
+      disableForReducedMotion: true,
+    };
+    confetti({ ...base, particleCount: 70, origin: { x: 0.5, y: 0.7 } });
+    setTimeout(() => confetti({ ...base, particleCount: 35, angle: 60, origin: { x: 0.08, y: 0.75 } }), 180);
+    setTimeout(() => confetti({ ...base, particleCount: 35, angle: 120, origin: { x: 0.92, y: 0.75 } }), 340);
   }
 
   async function fetchWordDefinition(word) {
