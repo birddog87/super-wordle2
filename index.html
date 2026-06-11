@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#121213">
+  <meta name="theme-color" content="#131711">
   <meta name="description" content="A polished, offline-friendly Wordle game with daily, random and 6-letter modes, hard mode, stats and achievements.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -17,47 +17,40 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js" defer></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js" defer></script>
   <script src="script.js" defer></script>
 </head>
 <body>
   <div class="game-container">
     <header>
-      <h1>Wordle<span class="title-accent">Upgrade</span></h1>
+      <h1 class="wordmark">Wordle<span class="wordmark-accent">Upgrade</span></h1>
       <div class="header-actions">
-        <button id="open-help" class="icon-button" type="button" aria-label="How to play" title="How to play">?</button>
-        <button id="open-settings" class="icon-button" type="button" aria-label="Settings" title="Settings">⚙</button>
-        <span id="user-display" class="user-display">Guest</span>
-        <button id="login-button" type="button">Login</button>
-        <button id="logout-button" type="button" style="display: none;">Logout</button>
+        <button id="streak-badge" class="streak-badge" type="button" aria-label="Current streak. View statistics" title="Streak">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+          <span id="streak-count">0</span>
+        </button>
+        <button id="open-help" class="icon-button" type="button" aria-label="How to play" title="How to play">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </button>
+        <button id="open-stats" class="icon-button" type="button" aria-label="Statistics" title="Statistics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+        </button>
+        <button id="open-settings" class="icon-button" type="button" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
       </div>
     </header>
 
-    <div id="mode-indicator">Mode: Daily</div>
-
-    <nav class="mode-selection" aria-label="Game modes">
-      <button id="daily-mode-button" type="button">Daily</button>
-      <button id="random-mode-button" type="button">Random</button>
-      <button id="six-letter-mode-button" type="button">6-Letter</button>
+    <nav class="mode-switch" data-active="0" aria-label="Game modes">
+      <button id="daily-mode-button" class="active" type="button" aria-pressed="true">Daily</button>
+      <button id="random-mode-button" type="button" aria-pressed="false">Random</button>
+      <button id="six-letter-mode-button" type="button" aria-pressed="false">6-Letter</button>
     </nav>
-
-    <div class="menu-selection">
-      <button id="view-leaderboard" type="button">Leaderboard</button>
-      <button id="view-achievements" type="button">Achievements</button>
-      <button id="open-feedback" type="button">Feedback</button>
-    </div>
+    <p id="mode-indicator" class="mode-context">Daily</p>
 
     <main role="main">
       <div id="game-board" aria-label="Game board"></div>
       <div id="keyboard" aria-label="On-screen keyboard"></div>
-      <section id="statistics">
-        <h2>Your Statistics</h2>
-        <div id="stats-summary" class="stats-summary"></div>
-        <div id="streak-counter">Current Streak: 0</div>
-        <h3 class="chart-title">Guess Distribution</h3>
-        <canvas id="stats-chart" aria-label="Guess distribution chart"></canvas>
-      </section>
     </main>
   </div>
 
@@ -67,35 +60,49 @@
     <div class="modal-content" role="dialog" aria-labelledby="name-modal-title" aria-modal="true">
       <button class="close" aria-label="Close" type="button">&times;</button>
       <h2 id="name-modal-title">What should we call you?</h2>
-      <input type="text" id="player-name-input" placeholder="Player Name" maxlength="20" autocomplete="nickname">
-      <button id="save-name-button" type="button">Save</button>
+      <input type="text" id="player-name-input" placeholder="Player name" maxlength="20" autocomplete="nickname">
+      <button id="save-name-button" class="modal-button" type="button">Save</button>
     </div>
   </div>
 
   <div id="help-modal" class="modal" aria-hidden="true">
     <div class="modal-content" role="dialog" aria-labelledby="help-modal-title" aria-modal="true">
       <button class="close" aria-label="Close" type="button">&times;</button>
-      <h2 id="help-modal-title">How To Play</h2>
+      <h2 id="help-modal-title">How to play</h2>
       <div class="help-body">
         <p>Guess the word in 6 tries. Each guess must be a real word.</p>
-        <p>After each guess, the tiles change colour to show how close you were:</p>
+        <p>After each guess, the tiles show how close you were:</p>
         <div class="help-examples">
           <div class="help-row">
-            <span class="mini-tile correct">W</span><span class="mini-tile">O</span><span class="mini-tile">R</span><span class="mini-tile">D</span><span class="mini-tile">Y</span>
-            <p><strong>W</strong> is in the word and in the right spot.</p>
+            <span class="mini-tile correct" style="--i:0">W</span><span class="mini-tile" style="--i:1">O</span><span class="mini-tile" style="--i:2">R</span><span class="mini-tile" style="--i:3">D</span><span class="mini-tile" style="--i:4">Y</span>
+            <p><strong>W</strong> is in the word, in the right spot.</p>
           </div>
           <div class="help-row">
-            <span class="mini-tile">L</span><span class="mini-tile present">I</span><span class="mini-tile">G</span><span class="mini-tile">H</span><span class="mini-tile">T</span>
-            <p><strong>I</strong> is in the word but in the wrong spot.</p>
+            <span class="mini-tile" style="--i:0">L</span><span class="mini-tile present" style="--i:1">I</span><span class="mini-tile" style="--i:2">G</span><span class="mini-tile" style="--i:3">H</span><span class="mini-tile" style="--i:4">T</span>
+            <p><strong>I</strong> is in the word, but elsewhere.</p>
           </div>
           <div class="help-row">
-            <span class="mini-tile">R</span><span class="mini-tile">O</span><span class="mini-tile">G</span><span class="mini-tile absent">U</span><span class="mini-tile">E</span>
+            <span class="mini-tile" style="--i:0">R</span><span class="mini-tile" style="--i:1">O</span><span class="mini-tile" style="--i:2">G</span><span class="mini-tile absent" style="--i:3">U</span><span class="mini-tile" style="--i:4">E</span>
             <p><strong>U</strong> is not in the word at all.</p>
           </div>
         </div>
-        <p><strong>Modes:</strong> <em>Daily</em> is the same word for everyone, once a day. <em>Random</em> and <em>6-Letter</em> are unlimited — hit <em>Play Again</em> as much as you like.</p>
+        <p><strong>Daily</strong> is one shared word per day. <strong>Random</strong> and <strong>6-Letter</strong> are unlimited; play as much as you like.</p>
       </div>
-      <button id="help-got-it" type="button">Let's play!</button>
+      <button id="help-got-it" class="modal-button" type="button">Let's play</button>
+    </div>
+  </div>
+
+  <div id="stats-modal" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-labelledby="stats-modal-title" aria-modal="true">
+      <button class="close" aria-label="Close" type="button">&times;</button>
+      <h2 id="stats-modal-title">Statistics</h2>
+      <div id="stats-summary" class="stats-summary"></div>
+      <h3 class="section-label">Guess distribution</h3>
+      <div id="guess-dist" class="guess-dist"></div>
+      <div class="stats-links">
+        <button id="view-leaderboard" type="button">Leaderboard</button>
+        <button id="view-achievements" type="button">Achievements</button>
+      </div>
     </div>
   </div>
 
@@ -126,6 +133,18 @@
           <label class="switch"><input type="checkbox" id="setting-sound"><span class="slider"></span></label>
         </li>
       </ul>
+      <div class="settings-account">
+        <div class="account-line">
+          <span class="setting-name">Account</span>
+          <span id="user-display" class="user-display">Guest</span>
+        </div>
+        <p class="setting-desc account-note">Stats are saved on this device. Log in to post scores to the online leaderboard.</p>
+        <div class="account-actions">
+          <button id="login-button" type="button">Log in</button>
+          <button id="logout-button" type="button" style="display: none;">Log out</button>
+          <button id="open-feedback" class="text-button" type="button">Send feedback</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -151,7 +170,7 @@
   <div id="daily-attempt-modal" class="modal" aria-hidden="true">
     <div class="modal-content" role="dialog" aria-labelledby="daily-attempt-modal-title" aria-modal="true">
       <button class="close" aria-label="Close" type="button">&times;</button>
-      <h2 id="daily-attempt-modal-title">Daily Word Already Played</h2>
+      <h2 id="daily-attempt-modal-title">Done for today</h2>
       <div id="daily-attempt-content"></div>
     </div>
   </div>
@@ -161,7 +180,7 @@
       <button class="close" aria-label="Close" type="button">&times;</button>
       <h2 id="feedback-modal-title">Feedback</h2>
       <textarea id="feedback-text" placeholder="What's on your mind?" maxlength="2000"></textarea>
-      <button id="submit-feedback" type="button">Submit</button>
+      <button id="submit-feedback" class="modal-button" type="button">Submit</button>
     </div>
   </div>
 
@@ -169,15 +188,17 @@
     <div class="modal-content" role="dialog" aria-labelledby="winning-modal-title" aria-modal="true">
       <button class="close" aria-label="Close" type="button">&times;</button>
       <h2 id="winning-modal-title">Congratulations!</h2>
-      <h3 id="winning-word-display"></h3>
+      <div id="result-word-tiles" class="result-tiles"></div>
+      <p id="winning-word-display" class="result-subline"></p>
       <div id="word-definition"></div>
+      <p id="next-daily" class="next-daily" hidden>Next Daily in <span id="next-daily-time" class="countdown-time">&mdash;</span></p>
       <div class="modal-actions">
         <button id="play-again-button" class="modal-button" type="button">Play Again</button>
       </div>
       <div class="share-buttons">
-        <button id="copy-result-button" type="button">Copy Result</button>
+        <button id="copy-result-button" type="button">Copy result</button>
         <button id="share-whatsapp-button" type="button">WhatsApp</button>
-        <button id="share-button" type="button">Twitter</button>
+        <button id="share-button" type="button">X</button>
       </div>
     </div>
   </div>
@@ -186,7 +207,7 @@
     <div class="modal-content" role="dialog" aria-labelledby="auth-modal-title" aria-modal="true">
       <button class="close" aria-label="Close" type="button">&times;</button>
       <h2 id="auth-modal-title">Login / Sign Up</h2>
-      <p class="modal-note">Optional — your stats are saved on this device either way. Log in to post scores to the online leaderboard.</p>
+      <p class="modal-note">Optional. Your stats are saved on this device either way. Log in to post scores to the online leaderboard.</p>
       <button id="email-signin-button" type="button">Sign in with Email</button>
       <button id="email-signup-button" type="button">Sign up with Email</button>
     </div>
@@ -198,7 +219,7 @@
       <h2 id="email-auth-title">Email Authentication</h2>
       <input type="email" id="user-email" placeholder="Email" autocomplete="email">
       <input type="password" id="user-password" placeholder="Password (6+ characters)" autocomplete="current-password" minlength="6">
-      <button id="email-auth-submit" type="button">Continue</button>
+      <button id="email-auth-submit" class="modal-button" type="button">Continue</button>
     </div>
   </div>
 

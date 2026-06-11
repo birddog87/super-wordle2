@@ -49,7 +49,7 @@
     leaderboardTabsBound: false,
     animating: false,
     loading: false,
-    statsChart: null,
+    countdownTimer: null,
     hardMode: false,
     soundOn: true,
     lastResult: null,
@@ -189,6 +189,7 @@
   function closeModal(idOrEl) {
     const m = typeof idOrEl === 'string' ? $(idOrEl) : idOrEl;
     if (!m || !m.classList.contains('open')) return;
+    if (m.querySelector('.countdown-time')) stopCountdown();
     if (reduceMotion()) {
       m.classList.remove('open', 'closing');
       m.setAttribute('aria-hidden', 'true');
@@ -226,8 +227,26 @@
   }
 
   function updateModeIndicator(mode) {
-    const label = mode === CONFIG.MODES.SIX ? '6-Letter' : mode.charAt(0).toUpperCase() + mode.slice(1);
-    $('mode-indicator').textContent = `Mode: ${label}`;
+    const order = [CONFIG.MODES.DAILY, CONFIG.MODES.RANDOM, CONFIG.MODES.SIX];
+    const idx = Math.max(0, order.indexOf(mode));
+    const switcher = document.querySelector('.mode-switch');
+    if (switcher) {
+      switcher.dataset.active = idx;
+      [...switcher.children].forEach((btn, i) => {
+        btn.classList.toggle('active', i === idx);
+        btn.setAttribute('aria-pressed', String(i === idx));
+      });
+    }
+    const ctx = $('mode-indicator');
+    if (!ctx) return;
+    if (mode === CONFIG.MODES.DAILY) {
+      const date = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      ctx.textContent = `Puzzle #${dailyIndex()} · ${date}`;
+    } else if (mode === CONFIG.MODES.SIX) {
+      ctx.textContent = 'Unlimited · 6 letters';
+    } else {
+      ctx.textContent = 'Unlimited · 5 letters';
+    }
   }
 
   // ---- Game lifecycle ----
@@ -243,6 +262,13 @@
     state.loading = false;
 
     if (mode === CONFIG.MODES.DAILY && localStorage.getItem(CONFIG.LS.DAILY_DONE) === todayISO()) {
+      // Keep a composed (idle) board behind the dialog instead of a blank screen
+      if (!$('game-board').children.length) {
+        state.wordLength = CONFIG.DEFAULT_LENGTH;
+        createBoard();
+        createKeyboard();
+      }
+      updateModeIndicator(CONFIG.MODES.DAILY);
       showDailyAttemptedModal();
       return;
     }
@@ -411,11 +437,16 @@
       const tile = tiles[i];
       const ch = state.currentGuess[i];
       tile.textContent = ch ? ch.toUpperCase() : '';
-      tile.classList.remove('invalid', 'pop');
+      tile.classList.remove('invalid', 'pop', 'caret');
       if (ch) {
         void tile.offsetWidth;
         tile.classList.add('pop');
       }
+    }
+    // Soft pulse on the tile awaiting input
+    if (state.gameActive && !reduceMotion()) {
+      const next = tiles[state.currentGuess.length];
+      if (next) next.classList.add('caret');
     }
   }
 
@@ -507,6 +538,7 @@
         endGame(false);
       } else {
         saveGame();
+        updateBoard();
       }
     }, totalDelay);
   }
@@ -548,7 +580,7 @@
       localStorage.setItem(CONFIG.LS.DAILY_DONE, todayISO());
       localStorage.setItem(CONFIG.LS.LAST_DAILY, state.targetWord);
     }
-    displayStatistics();
+    displayStatistics({ celebrate: true });
     if (won) {
       celebrateWin();
     } else {
@@ -574,17 +606,24 @@
     const lastWord = localStorage.getItem(CONFIG.LS.LAST_DAILY) || '';
     const content = $('daily-attempt-content');
     content.innerHTML = `
-      <p>You've already played today's word. Come back tomorrow!</p>
-      ${lastWord ? `<p>Today's word was: <strong>${sanitize(lastWord.toUpperCase())}</strong></p>` : ''}
+      <p class="result-subline">You've played today's puzzle. Today's word was</p>
+      <div class="result-tiles" id="daily-attempt-tiles"></div>
+      <p class="next-daily">Next Daily in <span class="countdown-time">&mdash;</span></p>
       <div class="modal-actions">
         <button id="switch-to-random" class="modal-button">Play Random Instead</button>
       </div>
     `;
+    if (lastWord) {
+      renderWordTiles($('daily-attempt-tiles'), lastWord, false);
+    } else {
+      $('daily-attempt-tiles').remove();
+    }
     $('switch-to-random').addEventListener('click', () => {
       closeModal('daily-attempt-modal');
       startGame(CONFIG.MODES.RANDOM);
     }, { once: true });
     openModal('daily-attempt-modal');
+    startCountdown(content.querySelector('.countdown-time'));
   }
 
   // Web Audio: decode the pop once, then fire a fresh source per reveal so
@@ -668,15 +707,21 @@
     return s;
   }
 
-  function displayStatistics() {
+  function displayStatistics(opts = {}) {
     const stats = loadStats();
     state.currentStreak = stats.currentStreak || 0;
-    const streakEl = $('streak-counter');
-    streakEl.textContent = `Current Streak: ${state.currentStreak} 🔥`;
-    if (state.lastResult && !reduceMotion()) {
-      streakEl.classList.remove('bump');
-      void streakEl.offsetWidth;
-      streakEl.classList.add('bump');
+
+    const badge = $('streak-badge');
+    const count = $('streak-count');
+    if (badge && count) {
+      count.textContent = state.currentStreak;
+      badge.classList.toggle('lit', state.currentStreak > 0);
+      badge.setAttribute('aria-label', `Current streak: ${state.currentStreak}. View statistics`);
+      if (opts.celebrate && state.lastResult && !reduceMotion()) {
+        badge.classList.remove('bump');
+        void badge.offsetWidth;
+        badge.classList.add('bump');
+      }
     }
 
     const winPct = stats.gamesPlayed > 0 ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
@@ -686,7 +731,8 @@
       [
         ['Played', stats.gamesPlayed],
         ['Win %', winPct],
-        ['Max Streak', stats.maxStreak],
+        ['Streak', stats.currentStreak],
+        ['Best', stats.maxStreak],
       ].forEach(([label, value]) => {
         const box = document.createElement('div');
         box.className = 'stat-box';
@@ -694,34 +740,34 @@
         summary.appendChild(box);
       });
     }
-    renderGuessChart(stats);
+    renderGuessDist(stats);
   }
 
-  function renderGuessChart(stats) {
-    const canvas = $('stats-chart');
-    if (!canvas || typeof Chart === 'undefined') return;
-    const labels = ['1', '2', '3', '4', '5', '6'];
-    const data = labels.map((n) => stats.guessDist[n] || 0);
+  function renderGuessDist(stats) {
+    const wrap = $('guess-dist');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    const max = Math.max(1, ...Object.values(stats.guessDist).map(Number));
     const latest = state.lastResult ? state.lastResult.attempts : null;
-    const css = getComputedStyle(document.documentElement);
-    const correct = css.getPropertyValue('--correct').trim() || '#538d4e';
-    const idle = css.getPropertyValue('--border-strong').trim() || '#565758';
-    const colors = labels.map((n) => (Number(n) === latest ? correct : idle));
-
-    if (state.statsChart) state.statsChart.destroy();
-    state.statsChart = new Chart(canvas.getContext('2d'), {
-      type: 'bar',
-      data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 4 }] },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        scales: {
-          x: { beginAtZero: true, ticks: { precision: 0, color: '#d7dadc' }, grid: { display: false } },
-          y: { ticks: { color: '#d7dadc' }, grid: { display: false } },
-        },
-      },
-    });
+    for (let n = 1; n <= CONFIG.MAX_GUESSES; n++) {
+      const c = stats.guessDist[n] || 0;
+      const row = document.createElement('div');
+      row.className = 'dist-row';
+      const label = document.createElement('span');
+      label.className = 'dist-label';
+      label.textContent = n;
+      const track = document.createElement('div');
+      track.className = 'dist-track';
+      const fill = document.createElement('div');
+      fill.className = 'dist-fill' + (n === latest ? ' latest' : '') + (c === 0 ? ' zero' : '');
+      fill.style.setProperty('--i', n - 1);
+      fill.style.width = c > 0 ? `${Math.round((c / max) * 100)}%` : '';
+      fill.textContent = c;
+      track.appendChild(fill);
+      row.appendChild(label);
+      row.appendChild(track);
+      wrap.appendChild(row);
+    }
   }
 
   function syncStatsToFirebase(stats) {
@@ -752,36 +798,87 @@
   }
 
   // ---- Result modal (win or loss) ----
+  function renderWordTiles(container, word, correct) {
+    container.innerHTML = '';
+    word.toUpperCase().split('').forEach((ch, i) => {
+      const t = document.createElement('span');
+      t.className = 'result-tile' + (correct ? ' correct' : '');
+      t.style.setProperty('--i', i);
+      t.textContent = ch;
+      container.appendChild(t);
+    });
+  }
+
+  function formatDuration(secs) {
+    if (secs < 100) return `${secs}s`;
+    return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  }
+
+  function msToNextMidnight() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
+  }
+
+  function startCountdown(el) {
+    stopCountdown();
+    if (!el) return;
+    const tick = () => {
+      const ms = msToNextMidnight();
+      const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
+      const m = String(Math.floor(ms / 60000) % 60).padStart(2, '0');
+      const s = String(Math.floor(ms / 1000) % 60).padStart(2, '0');
+      el.textContent = `${h}:${m}:${s}`;
+    };
+    tick();
+    state.countdownTimer = setInterval(tick, 1000);
+  }
+
+  function stopCountdown() {
+    if (state.countdownTimer) {
+      clearInterval(state.countdownTimer);
+      state.countdownTimer = null;
+    }
+  }
+
   function showResultModal(won) {
     const title = $('winning-modal-title');
-    const wordDisplay = $('winning-word-display');
+    const subline = $('winning-word-display');
+    const attempts = state.guesses.length;
+    const secs = Math.floor((Date.now() - state.startTime) / 1000);
     if (won) {
-      title.textContent = pickWinTitle(state.guesses.length);
-      wordDisplay.textContent = `${state.targetWord.toUpperCase()} in ${state.guesses.length} ${state.guesses.length === 1 ? 'try' : 'tries'}`;
+      title.textContent = pickWinTitle(attempts);
+      subline.textContent = `Solved in ${attempts} ${attempts === 1 ? 'try' : 'tries'} · ${formatDuration(secs)}`;
     } else {
       title.textContent = 'So close!';
-      wordDisplay.textContent = `The word was ${state.targetWord.toUpperCase()}`;
+      subline.textContent = 'That one got away.';
     }
+    renderWordTiles($('result-word-tiles'), state.targetWord, won);
+
+    const isDaily = state.currentMode === CONFIG.MODES.DAILY;
+    $('play-again-button').textContent = isDaily ? 'Play Random' : 'Play Again';
+    const nextDaily = $('next-daily');
+    nextDaily.hidden = !isDaily;
+    if (isDaily) startCountdown($('next-daily-time'));
+
     openModal('winning-modal');
 
     const def = $('word-definition');
-    def.innerHTML = '<em>Loading definition…</em>';
+    def.innerHTML = '<em class="def-loading">Looking it up…</em>';
     fetchWordDefinition(state.targetWord)
       .then((details) => {
         def.innerHTML = '';
-        const header = document.createElement('strong');
-        header.textContent = 'Definition:';
-        def.appendChild(header);
-        def.appendChild(document.createElement('br'));
         details.forEach((d) => {
+          const entry = document.createElement('p');
+          entry.className = 'def-entry';
           const pos = document.createElement('em');
-          pos.textContent = d.partOfSpeech + ': ';
-          def.appendChild(pos);
-          def.appendChild(document.createTextNode(d.definitions.join('; ')));
-          def.appendChild(document.createElement('br'));
+          pos.className = 'def-pos';
+          pos.textContent = d.partOfSpeech;
+          entry.appendChild(pos);
+          entry.appendChild(document.createTextNode(d.definitions.join('; ')));
+          def.appendChild(entry);
         });
       })
-      .catch(() => { def.innerHTML = '<em>Definition not available.</em>'; });
+      .catch(() => { def.innerHTML = '<em class="def-loading">Definition not available.</em>'; });
 
     if (won) triggerConfetti();
   }
@@ -910,6 +1007,7 @@
   }
 
   function viewLeaderboard() {
+    closeModal('stats-modal');
     openModal('leaderboard-modal');
     if (!state.leaderboardTabsBound) {
       $$('.tablink').forEach((tab) => {
@@ -1035,6 +1133,7 @@
   }
 
   function displayAchievements() {
+    closeModal('stats-modal');
     const achievements = loadAch();
     const list = $('achievements-list');
     list.innerHTML = '';
@@ -1208,7 +1307,13 @@
     $('six-letter-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.SIX));
     $('view-leaderboard').addEventListener('click', viewLeaderboard);
     $('view-achievements').addEventListener('click', displayAchievements);
-    $('open-feedback').addEventListener('click', () => openModal('feedback-modal'));
+    const openStats = () => { displayStatistics(); openModal('stats-modal'); };
+    $('open-stats').addEventListener('click', openStats);
+    $('streak-badge').addEventListener('click', openStats);
+    $('open-feedback').addEventListener('click', () => {
+      closeModal('settings-modal');
+      openModal('feedback-modal');
+    });
     $('submit-feedback').addEventListener('click', submitFeedback);
     $('save-name-button').addEventListener('click', saveName);
     $('player-name-input').addEventListener('keydown', (e) => {

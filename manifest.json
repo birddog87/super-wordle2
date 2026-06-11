@@ -9,9 +9,9 @@
     { "src": "icons/icon-maskable-512.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
   ],
   "start_url": "./index.html",
-  "background_color": "#121213",
+  "background_color": "#131711",
   "display": "standalone",
   "orientation": "portrait",
   "scope": "./",
-  "theme_color": "#121213"
+  "theme_color": "#131711"
 }
