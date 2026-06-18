@@ -1107,6 +1107,7 @@ td { font-variant-numeric: tabular-nums; }
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
 }
+.h2h-countdown[hidden] { display: none; }
 .h2h-countdown-num {
   font-size: clamp(5rem, 30vw, 12rem);
   font-weight: 800;
