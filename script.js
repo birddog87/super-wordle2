@@ -1498,7 +1498,58 @@
     h.ref.child('players/' + h.myUid + '/typing').set(typing).catch(() => {});
   }
 
-  function raceSubmitGuess() {}
+  function raceSubmitGuess() {
+    const h = state.h2h;
+    state.animating = true;
+    const board = $('game-board');
+    const row = board.children[state.guesses.length];
+    const tiles = row.children;
+    const evaluation = evaluateGuess(state.currentGuess, h.word);
+
+    for (let i = 0; i < h.wordLength; i++) {
+      const tile = tiles[i];
+      tile.style.setProperty('--flip-delay', `${i * CONFIG.FLIP_STEP_MS}ms`);
+      tile.classList.add('flip');
+      setTimeout(() => {
+        tile.classList.add(evaluation[i]);
+        if (evaluation[i] === 'correct') {
+          if (!state.correctPositions[i]) { state.correctPositions[i] = true; tile.classList.add('correct-first-time'); }
+          playPopSound();
+        }
+        updateKeyColor(state.currentGuess[i], evaluation[i]);
+      }, i * CONFIG.FLIP_STEP_MS + CONFIG.FLIP_DURATION_MS / 2);
+    }
+
+    const code = encodeEval(evaluation);
+    const won = state.currentGuess === h.word;
+    const totalDelay = h.wordLength * CONFIG.FLIP_STEP_MS + CONFIG.FLIP_DURATION_MS;
+    setTimeout(() => {
+      state.guesses.push(state.currentGuess);
+      h.guesses.push(code);
+      state.currentGuess = '';
+      state.animating = false;
+      h.typing = false;
+      // Publish my row codes + count. Letters never leave the device.
+      h.ref.child('players/' + h.myUid).update({
+        progress: h.guesses,
+        guesses: h.guesses.length,
+        typing: false,
+        greens: greenCount(code),
+      }).catch(() => {});
+
+      if (won) {
+        h.active = false;
+        claimWin(h);
+      } else if (h.guesses.length >= CONFIG.MAX_GUESSES) {
+        h.active = false;
+        declareFailed(h);
+      } else {
+        updateBoard();
+      }
+    }, totalDelay);
+  }
+  function claimWin() {}
+  function declareFailed() {}
   function renderOpponent() {}
   function maybeResolve() {}
   function showRaceResult() {}
