@@ -971,3 +971,172 @@ td { font-variant-numeric: tabular-nums; }
     scroll-behavior: auto !important;
   }
 }
+
+/* ---- Head-to-Head ---- */
+
+/* Subtle accent on the H2H launcher when hovered */
+#open-h2h:hover { color: var(--accent); }
+
+/* ── Opponent panel — a slim card above the board ─────────── */
+.opponent-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-key);
+  padding: 8px 12px;
+  margin: 0 auto 14px;
+  max-width: 320px;
+  text-align: left;
+  animation: rise 0.4s var(--ease-out-expo) backwards;
+}
+
+.opp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.opp-name {
+  font-weight: 600;
+  color: var(--fg);
+  font-size: 0.92rem;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.opp-status {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.opp-status.typing::after {
+  content: ' · typing…';
+  color: var(--accent);
+}
+
+/* Miniature read-only view of the opponent's board */
+.opp-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.opp-row {
+  display: grid;
+  grid-template-columns: repeat(var(--len, 5), 1fr);
+  gap: 2px;
+}
+.opp-cell {
+  width: clamp(11px, 3.4vw, 14px);
+  aspect-ratio: 1 / 1;
+  border-radius: 2px;
+  background: var(--absent);
+  transition: background-color 0.25s var(--ease-out-expo);
+}
+.opp-cell.correct { background: var(--correct); }
+.opp-cell.present { background: var(--present); }
+.opp-cell.empty   { background: var(--bg-deep); }
+
+/* ── Lobby — race code & join row ─────────────────────────── */
+.h2h-code {
+  font-size: clamp(2rem, 12vw, 3rem);
+  letter-spacing: 0.2em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: var(--fg);
+  margin: 10px 0 14px;
+  text-indent: 0.2em; /* offset trailing letter-spacing for true centering */
+}
+
+.h2h-join-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 12px;
+}
+.h2h-join-row #h2h-code-input {
+  flex: 1 1 auto;
+  margin: 0;
+  min-height: 44px;
+  text-transform: uppercase;
+  text-align: center;
+  letter-spacing: 0.18em;
+  font-weight: 700;
+  font-size: 16px;
+}
+.h2h-join-row #h2h-join {
+  flex: 0 0 auto;
+  align-self: center;
+  margin: 0;
+}
+
+/* ── Waiting state — pulsing presence dot ─────────────────── */
+.h2h-wait-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+  margin: 14px 0 10px;
+}
+.h2h-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: h2hPulse 1.4s var(--ease-out-quart) infinite;
+}
+@keyframes h2hPulse {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%      { opacity: 0.3; transform: scale(0.7); }
+}
+
+/* ── Countdown overlay — full-screen "3, 2, 1" ────────────── */
+.h2h-countdown {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 1400;
+  background: color-mix(in oklab, var(--bg-deep) 80%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+.h2h-countdown-num {
+  font-size: clamp(5rem, 30vw, 12rem);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes h2hCount {
+  from { transform: scale(1.4); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+.h2h-countdown-num.pulse { animation: h2hCount 0.4s var(--ease-out-expo); }
+
+/* ── Landscape — tuck the opponent panel beside the board ─── */
+@media (orientation: landscape) and (max-height: 520px) {
+  .opponent-panel {
+    margin: 0;
+    flex: 0 0 auto;
+    max-width: 180px;
+    align-self: stretch;
+    overflow-y: auto;
+  }
+  .opp-cell { width: clamp(8px, 2vh, 12px); }
+}
+
+/* ── Reduced motion — kill H2H motion ─────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .opp-cell { transition: none; }
+  .h2h-pulse,
+  .h2h-countdown-num.pulse {
+    animation: none;
+  }
+}
