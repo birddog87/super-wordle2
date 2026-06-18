@@ -56,6 +56,8 @@
     audioCtx: null,
     popBuffer: null,
     popBytesPromise: null,
+    h2h: null,            // active race context (see startRaceContext)
+    serverOffset: 0,      // ms offset from Firebase server clock
   };
 
   const $ = (id) => document.getElementById(id);
@@ -1205,6 +1207,19 @@
       if (state.soundOn) ensureAudio();
     });
   }
+
+  // ---- Head-to-Head (live race) ----
+
+  // Resolve a uid for racing. Reuse an existing logged-in uid; otherwise sign in
+  // anonymously. Returns a promise of the uid.
+  function ensureRaceAuth() {
+    if (state.userId) return Promise.resolve(state.userId);
+    if (auth.currentUser) return Promise.resolve(auth.currentUser.uid);
+    return auth.signInAnonymously().then((cred) => cred.user.uid);
+  }
+
+  // Read-only export so pure helpers can be asserted against in the browser.
+  window.__WU_TEST__ = window.__WU_TEST__ || {};
 
   // ---- Auth UI ----
   function bindAuthUI() {
