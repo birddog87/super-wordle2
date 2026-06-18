@@ -1550,7 +1550,32 @@
   }
   function claimWin() {}
   function declareFailed() {}
-  function renderOpponent() {}
+  function renderOpponent(h, opp) {
+    const grid = $('opp-grid');
+    const status = $('opp-status');
+    if (!opp) { grid.innerHTML = ''; status.textContent = 'guess 0/6'; status.classList.remove('typing'); return; }
+    const len = h.wordLength;
+    const progress = opp.progress || [];
+    grid.style.setProperty('--len', len);
+    let html = '';
+    for (let r = 0; r < CONFIG.MAX_GUESSES; r++) {
+      const code = progress[r];
+      html += `<div class="opp-row" style="--len:${len}">`;
+      for (let c = 0; c < len; c++) {
+        if (code) {
+          const cls = code[c] === '2' ? 'correct' : code[c] === '1' ? 'present' : 'absent';
+          html += `<span class="opp-cell ${cls}"></span>`;
+        } else {
+          html += '<span class="opp-cell empty"></span>';
+        }
+      }
+      html += '</div>';
+    }
+    grid.innerHTML = html;
+    const n = progress.length;
+    status.textContent = opp.solved ? 'solved!' : opp.failed ? 'out of guesses' : `guess ${n}/6`;
+    status.classList.toggle('typing', !!opp.typing && !opp.solved && !opp.failed);
+  }
   function maybeResolve() {}
   function showRaceResult() {}
 
