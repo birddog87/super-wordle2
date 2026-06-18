@@ -1218,8 +1218,33 @@
     return auth.signInAnonymously().then((cred) => cred.user.uid);
   }
 
+  // 4-char code from an unambiguous alphabet (no O/0/I/1). Pure.
+  const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  function genRoomCode(rand) {
+    const r = rand || Math.random;
+    let code = '';
+    for (let i = 0; i < 4; i++) code += CODE_ALPHABET[Math.floor(r() * CODE_ALPHABET.length)];
+    return code;
+  }
+
+  // ['correct','present','absent'] -> "210"-style string. Pure.
+  function encodeEval(evalArr) {
+    return evalArr.map((s) => (s === 'correct' ? '2' : s === 'present' ? '1' : '0')).join('');
+  }
+
+  // "210" -> ['correct','present','absent']. Pure.
+  function decodeEval(code) {
+    return code.split('').map((c) => (c === '2' ? 'correct' : c === '1' ? 'present' : 'absent'));
+  }
+
+  // Greens in a row code (for the both-failed tiebreak). Pure.
+  function greenCount(code) {
+    return (code.match(/2/g) || []).length;
+  }
+
   // Read-only export so pure helpers can be asserted against in the browser.
   window.__WU_TEST__ = window.__WU_TEST__ || {};
+  Object.assign(window.__WU_TEST__, { genRoomCode, encodeEval, decodeEval, greenCount, CODE_ALPHABET });
 
   // ---- Auth UI ----
   function bindAuthUI() {
