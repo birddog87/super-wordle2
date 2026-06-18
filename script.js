@@ -191,6 +191,14 @@
   function closeModal(idOrEl) {
     const m = typeof idOrEl === 'string' ? $(idOrEl) : idOrEl;
     if (!m || !m.classList.contains('open')) return;
+    // Dismissing the H2H result modal (×, backdrop, or Esc) while a race context
+    // lingers must clean up and return to solo — otherwise input stays dead.
+    if (m.id === 'h2h-result-modal' && state.h2h && !state._leavingRace) {
+      state._leavingRace = true;
+      leaveRace();
+      state._leavingRace = false;
+      return;
+    }
     if (m.querySelector('.countdown-time')) stopCountdown();
     if (reduceMotion()) {
       m.classList.remove('open', 'closing');
