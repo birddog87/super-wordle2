@@ -1548,8 +1548,20 @@
       }
     }, totalDelay);
   }
-  function claimWin() {}
-  function declareFailed() {}
+  // First correct submission to write `winner` wins (transaction aborts if already set).
+  function claimWin(h) {
+    h.ref.child('players/' + h.myUid).update({
+      solved: true, solvedAt: firebase.database.ServerValue.TIMESTAMP,
+    });
+    h.ref.child('winner').transaction((cur) => (cur === null ? h.myUid : undefined))
+      .then(() => h.ref.child('status').set('done'))
+      .catch(() => {});
+  }
+
+  function declareFailed(h) {
+    h.ref.child('players/' + h.myUid).update({ failed: true });
+    // The both-failed outcome is resolved in maybeResolve.
+  }
   function renderOpponent(h, opp) {
     const grid = $('opp-grid');
     const status = $('opp-status');
@@ -1576,8 +1588,68 @@
     status.textContent = opp.solved ? 'solved!' : opp.failed ? 'out of guesses' : `guess ${n}/6`;
     status.classList.toggle('typing', !!opp.typing && !opp.solved && !opp.failed);
   }
-  function maybeResolve() {}
-  function showRaceResult() {}
+  // When both players have run out, decide a winner by greens, else a draw.
+  function maybeResolve(h, data) {
+    if (data.winner) return;                  // someone already solved
+    const players = data.players || {};
+    const ids = Object.keys(players);
+    if (ids.length < 2) return;
+    const allFailed = ids.every((id) => players[id].failed);
+    if (!allFailed) return;
+    h.ref.child('winner').transaction((cur) => {
+      if (cur !== null) return undefined;
+      const [a, b] = ids;
+      const ga = players[a].greens || 0, gb = players[b].greens || 0;
+      if (ga > gb) return a;
+      if (gb > ga) return b;
+      return 'draw';
+    }).then(() => h.ref.child('status').set('done')).catch(() => {});
+  }
+
+  function showRaceResult(h, data) {
+    h.active = false;
+    state.gameActive = false;
+    const players = data.players || {};
+    const me = players[h.myUid] || {};
+    const opp = players[h.oppUid] || {};
+    const winner = data.winner;
+    const won = winner === h.myUid;
+    const oppName = opp.name || 'Opponent';
+    let headline, line;
+    if (winner === 'draw') {
+      headline = 'Draw';
+      line = `Nobody solved ${h.word.toUpperCase()}.`;
+    } else if (won) {
+      headline = 'You win! 🏆';
+      line = me.solved
+        ? `Solved in ${me.guesses} · ${oppName} ${opp.solved ? 'also solved' : 'missed it'}.`
+        : `${oppName} ran out of guesses.`;
+    } else {
+      headline = `${oppName} wins`;
+      line = opp.solved ? `${oppName} got it in ${opp.guesses}.` : 'You ran out of guesses.';
+    }
+    $('h2h-result-title').textContent = headline;
+    $('h2h-result-subline').textContent = line;
+    renderWordTiles($('h2h-result-tiles'), h.word, won);
+
+    const def = $('h2h-result-def');
+    def.innerHTML = '<em class="def-loading">Looking it up…</em>';
+    fetchWordDefinition(h.word)
+      .then((details) => {
+        def.innerHTML = '';
+        details.forEach((d) => {
+          const p = document.createElement('p'); p.className = 'def-entry';
+          const pos = document.createElement('em'); pos.className = 'def-pos'; pos.textContent = d.partOfSpeech;
+          p.appendChild(pos); p.appendChild(document.createTextNode(d.definitions.join('; ')));
+          def.appendChild(p);
+        });
+      })
+      .catch(() => { def.innerHTML = '<em class="def-loading">Definition not available.</em>'; });
+
+    closeModal('h2h-modal');
+    openModal('h2h-result-modal');
+    if (won) triggerConfetti();
+  }
 
   // Read-only export so pure helpers can be asserted against in the browser.
   window.__WU_TEST__ = window.__WU_TEST__ || {};
