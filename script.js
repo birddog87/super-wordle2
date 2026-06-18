@@ -398,6 +398,7 @@
   }
 
   function handleKeyPress(rawKey) {
+    if (state.h2h && state.h2h.active) { return raceKeyPress(rawKey); }
     if (!state.gameActive || state.animating) return;
     ensureAudio();
     flashKey(rawKey);
@@ -1414,7 +1415,90 @@
     state.h2h = null;
   }
 
-  function beginRace() {}
+  function beginRace(h, data) {
+    closeModal('h2h-modal');
+    h.word = data.word;
+    h.wordLength = data.wordLength || CONFIG.DEFAULT_LENGTH;
+    loadWordList();              // ensure the guess dictionary is loaded (memoized; the guest needs it)
+    // Set up this player's own board, reusing the solo renderers.
+    state.wordLength = h.wordLength;
+    state.currentGuess = '';
+    state.guesses = [];
+    state.correctPositions = new Array(h.wordLength).fill(false);
+    state.gameActive = false;   // race input is gated by h.active, not gameActive
+    state.animating = false;
+    createBoard();
+    createKeyboard();
+    updateBoard();
+    $('opponent-panel').hidden = false;
+    setOpponentName(h);
+    renderOpponent(h, (data.players || {})[h.oppUid]);
+    $('mode-indicator').textContent = 'Head to Head · race';
+    runCountdown(data.startAt, () => {
+      h.active = true;
+      h.startTime = Date.now();
+      const cd = $('h2h-countdown');
+      cd.hidden = true;
+      cd.setAttribute('aria-hidden', 'true');
+    });
+  }
+
+  function setOpponentName(h) {
+    const opp = (h.latest && h.latest.players && h.latest.players[h.oppUid]) || {};
+    $('opp-name').textContent = opp.name || 'Opponent';
+  }
+
+  // Synced 3-2-1 using the Firebase server clock offset. Calls onGo at startAt.
+  function runCountdown(startAt, onGo) {
+    const overlay = $('h2h-countdown');
+    const num = $('h2h-countdown-num');
+    overlay.hidden = false;
+    overlay.removeAttribute('aria-hidden');
+    const tick = () => {
+      const now = Date.now() + state.serverOffset;
+      const remain = startAt - now;
+      if (remain <= 0) { onGo(); return; }
+      const secs = Math.ceil(remain / 1000);
+      if (num.textContent !== String(secs)) {
+        num.textContent = secs;
+        if (!reduceMotion()) { num.classList.remove('pulse'); void num.offsetWidth; num.classList.add('pulse'); }
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  function raceKeyPress(rawKey) {
+    const h = state.h2h;
+    if (!h || !h.active || state.animating) return;
+    ensureAudio();
+    flashKey(rawKey);
+    const key = rawKey.toLowerCase();
+    if (key === 'enter') {
+      if (state.currentGuess.length !== h.wordLength) { toast('Not enough letters.', 'warn'); shakeCurrentRow(); return; }
+      if (!isValidGuess(state.currentGuess)) { toast('Not in word list.', 'warn'); shakeCurrentRow(); return; }
+      raceSubmitGuess();
+    } else if (key === 'backspace') {
+      state.currentGuess = state.currentGuess.slice(0, -1);
+      updateBoard();
+      setTyping(h, state.currentGuess.length > 0);
+    } else if (/^[a-z]$/.test(key)) {
+      if (state.currentGuess.length < h.wordLength) {
+        state.currentGuess += key;
+        updateBoard();
+        setTyping(h, true);
+      }
+    }
+  }
+
+  // Throttled: only writes when the typing flag actually changes.
+  function setTyping(h, typing) {
+    if (h.typing === typing) return;
+    h.typing = typing;
+    h.ref.child('players/' + h.myUid + '/typing').set(typing).catch(() => {});
+  }
+
+  function raceSubmitGuess() {}
   function renderOpponent() {}
   function maybeResolve() {}
   function showRaceResult() {}
