@@ -1320,9 +1320,10 @@
   function leaveRace() {
     const h = state.h2h;
     if (h) {
-      h.ref.onDisconnect().cancel();
-      h.ref.remove().catch(() => {});
-      state.h2h = null;
+      const wasWaiting = !h.started;
+      teardownRace(h);
+      if (wasWaiting) h.ref.remove().catch(() => {});
+      else h.ref.child('players/' + h.myUid + '/connected').set(false).catch(() => {});
     }
     closeModal('h2h-modal');
   }
@@ -1359,7 +1360,64 @@
         toast('Could not join. Check the code and your connection.', 'error');
       });
   }
-  function subscribeRace() {}
+  function subscribeRace(h) {
+    if (h._bound) return;
+    h._bound = true;
+    // Capture the server clock offset once for synced timing.
+    database.ref('.info/serverTimeOffset').once('value').then((s) => { state.serverOffset = s.val() || 0; });
+
+    h.handler = (snap) => {
+      const data = snap.val();
+      if (!data) { onRaceVanished(h); return; }
+      h.latest = data;
+      const players = data.players || {};
+      const ids = Object.keys(players);
+      h.oppUid = ids.find((id) => id !== h.myUid) || h.oppUid;
+
+      // Host starts the race once two players are present.
+      if (data.status === 'waiting' && h.role === 'host' && ids.length >= 2) {
+        const startAt = Date.now() + state.serverOffset + 3500;
+        h.ref.update({ status: 'live', startAt });
+        return; // next snapshot will carry status:'live'
+      }
+
+      if (data.status === 'live' && !h.started) {
+        h.started = true;
+        beginRace(h, data);
+      }
+
+      if (data.status === 'live' && h.started) {
+        renderOpponent(h, players[h.oppUid]);
+        maybeResolve(h, data);
+      }
+
+      if (data.status === 'done' && !h.finished) {
+        h.finished = true;
+        showRaceResult(h, data);
+      }
+    };
+    h.ref.on('value', h.handler);
+  }
+
+  function onRaceVanished(h) {
+    // The room was torn down before it started.
+    if (h.finished || h.started) return;
+    toast('The race was cancelled.', 'warn');
+    teardownRace(h);
+    showH2HPane('home');
+  }
+
+  function teardownRace(h) {
+    if (!h) return;
+    if (h.handler) h.ref.off('value', h.handler);
+    h.ref.onDisconnect().cancel();
+    state.h2h = null;
+  }
+
+  function beginRace() {}
+  function renderOpponent() {}
+  function maybeResolve() {}
+  function showRaceResult() {}
 
   // Read-only export so pure helpers can be asserted against in the browser.
   window.__WU_TEST__ = window.__WU_TEST__ || {};
