@@ -330,6 +330,7 @@
     }
     closeModal('name-modal');
     updateUserDisplay();
+    if (state._afterName) { const resolve = state._afterName; state._afterName = null; resolve(state.playerName); }
   }
 
   function createBoard() {
@@ -1242,6 +1243,94 @@
     return (code.match(/2/g) || []).length;
   }
 
+  function openH2H() {
+    showH2HPane('home');
+    $('h2h-code-input').value = '';
+    openModal('h2h-modal');
+  }
+
+  function showH2HPane(which) {
+    $('h2h-home').hidden = which !== 'home';
+    $('h2h-waiting').hidden = which !== 'waiting';
+  }
+
+  // Ensure we have a display name; prompt for one if needed. Resolves with the name.
+  function requireName() {
+    state.playerName = localStorage.getItem(CONFIG.LS.NAME) || state.playerName || '';
+    if (state.playerName) return Promise.resolve(state.playerName);
+    return new Promise((resolve) => { state._afterName = resolve; showNameModal(); });
+  }
+
+  // The race-node shape for one player.
+  function racePlayerSeed(name) {
+    return { name: sanitize(name), guesses: 0, progress: [], typing: false,
+             solved: false, failed: false, connected: true, greens: 0 };
+  }
+
+  // Build the in-memory race context stored on state.h2h.
+  function startRaceContext(code, role, myUid) {
+    return {
+      code, role, myUid, oppUid: null,
+      ref: database.ref('races/' + code),
+      word: null, wordLength: CONFIG.DEFAULT_LENGTH,
+      active: false, started: false, finished: false,
+      guesses: [], currentGuess: '', typing: false,
+    };
+  }
+
+  function createRace() {
+    ensureRaceAuth()
+      .then((uid) => requireName().then(() => uid))
+      .then((uid) => loadWordList().then(() => uid))
+      .then((uid) => {
+        const name = state.playerName || 'Player';
+        const code = genRoomCode();
+        const word = getRandomWord(CONFIG.DEFAULT_LENGTH);
+        const h = startRaceContext(code, 'host', uid);
+        h.word = word;
+        state.h2h = h;
+        const payload = {
+          status: 'waiting',
+          word, wordLength: CONFIG.DEFAULT_LENGTH,
+          host: uid,
+          createdAt: firebase.database.ServerValue.TIMESTAMP,
+          players: { [uid]: racePlayerSeed(name) },
+        };
+        return h.ref.set(payload).then(() => {
+          // Remove an abandoned room if the host disconnects while still waiting.
+          h.ref.onDisconnect().remove();
+          $('h2h-code-display').textContent = code;
+          showH2HPane('waiting');
+          subscribeRace(h);
+        });
+      })
+      .catch((err) => {
+        console.error('createRace failed', err);
+        toast('Could not start a race. Check your connection.', 'error');
+      });
+  }
+
+  function shareRace() {
+    if (!state.h2h) return;
+    const text = `Join my Wordle race! Code: ${state.h2h.code} — ${location.origin}${location.pathname}`;
+    if (navigator.share) navigator.share({ text }).catch(() => {});
+    else navigator.clipboard.writeText(text).then(() => toast('Invite copied!', 'success')).catch(() => {});
+  }
+
+  function leaveRace() {
+    const h = state.h2h;
+    if (h) {
+      h.ref.onDisconnect().cancel();
+      h.ref.remove().catch(() => {});
+      state.h2h = null;
+    }
+    closeModal('h2h-modal');
+  }
+
+  // Filled in by later tasks.
+  function joinRace() {}
+  function subscribeRace() {}
+
   // Read-only export so pure helpers can be asserted against in the browser.
   window.__WU_TEST__ = window.__WU_TEST__ || {};
   Object.assign(window.__WU_TEST__, { genRoomCode, encodeEval, decodeEval, greenCount, CODE_ALPHABET });
@@ -1364,6 +1453,23 @@
     $('help-got-it').addEventListener('click', () => {
       localStorage.setItem(CONFIG.LS.SEEN_HELP, '1');
       closeModal('help-modal');
+    });
+
+    $('open-h2h').addEventListener('click', openH2H);
+    $('h2h-create').addEventListener('click', createRace);
+    $('h2h-cancel').addEventListener('click', leaveRace);
+    $('h2h-copy-code').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(state.h2h ? state.h2h.code : ''); toast('Code copied!', 'success'); }
+      catch { toast('Could not copy.', 'error'); }
+    });
+    $('h2h-share').addEventListener('click', shareRace);
+    $('h2h-join').addEventListener('click', () => {
+      const code = $('h2h-code-input').value.trim().toUpperCase();
+      if (code.length !== 4) { toast('Enter the 4-character code.', 'warn'); return; }
+      joinRace(code);
+    });
+    $('h2h-code-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); $('h2h-join').click(); }
     });
 
     $('play-again-button').addEventListener('click', () => {
