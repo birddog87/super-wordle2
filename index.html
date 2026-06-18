@@ -38,6 +38,9 @@
         <button id="open-settings" class="icon-button" type="button" aria-label="Settings" title="Settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
+        <button id="open-h2h" class="icon-button" type="button" aria-label="Head to head" title="Head to head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14.5 3.5l6 6M3.5 14.5l6 6"/><path d="M18 2l4 4-9 9-4-4z" transform="translate(-7 1)"/><path d="M2 18l4 4 9-9-4-4z"/><path d="M14 7l3 3M7 14l3 3"/></svg>
+        </button>
       </div>
     </header>
 
@@ -49,12 +52,23 @@
     <p id="mode-indicator" class="mode-context">Daily</p>
 
     <main role="main">
+      <div id="opponent-panel" class="opponent-panel" hidden aria-live="polite">
+        <div class="opp-head">
+          <span id="opp-name" class="opp-name">Opponent</span>
+          <span id="opp-status" class="opp-status">guess 0/6</span>
+        </div>
+        <div id="opp-grid" class="opp-grid" aria-label="Opponent progress"></div>
+      </div>
       <div id="game-board" aria-label="Game board"></div>
       <div id="keyboard" aria-label="On-screen keyboard"></div>
     </main>
   </div>
 
   <div id="toast-container" role="status" aria-live="polite"></div>
+
+  <div id="h2h-countdown" class="h2h-countdown" hidden aria-hidden="true">
+    <span id="h2h-countdown-num" class="h2h-countdown-num">3</span>
+  </div>
 
   <div id="name-modal" class="modal" aria-hidden="true">
     <div class="modal-content" role="dialog" aria-labelledby="name-modal-title" aria-modal="true">
@@ -175,6 +189,34 @@
     </div>
   </div>
 
+  <div id="h2h-modal" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-labelledby="h2h-modal-title" aria-modal="true">
+      <button class="close" aria-label="Close" type="button">&times;</button>
+      <h2 id="h2h-modal-title">Head to Head</h2>
+
+      <div id="h2h-home" class="h2h-pane">
+        <p class="modal-note">Race a friend on the same word. First to solve wins.</p>
+        <button id="h2h-create" class="modal-button" type="button">Create a race</button>
+        <div class="h2h-join-row">
+          <input type="text" id="h2h-code-input" placeholder="Code" maxlength="4" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" inputmode="text" aria-label="Race code">
+          <button id="h2h-join" class="text-button" type="button">Join</button>
+        </div>
+      </div>
+
+      <div id="h2h-waiting" class="h2h-pane" hidden>
+        <p class="modal-note">Share this code with your friend:</p>
+        <div id="h2h-code-display" class="h2h-code" aria-live="polite">----</div>
+        <div class="share-buttons">
+          <button id="h2h-share" type="button">Share</button>
+          <button id="h2h-copy-code" type="button">Copy code</button>
+        </div>
+        <p class="h2h-wait-status"><span class="h2h-pulse"></span> Waiting for opponent…</p>
+        <button id="h2h-cancel" class="text-button" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <div id="feedback-modal" class="modal" aria-hidden="true">
     <div class="modal-content" role="dialog" aria-labelledby="feedback-modal-title" aria-modal="true">
       <button class="close" aria-label="Close" type="button">&times;</button>
@@ -199,6 +241,20 @@
         <button id="copy-result-button" type="button">Copy result</button>
         <button id="share-whatsapp-button" type="button">WhatsApp</button>
         <button id="share-button" type="button">X</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="h2h-result-modal" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-labelledby="h2h-result-title" aria-modal="true">
+      <button class="close" aria-label="Close" type="button">&times;</button>
+      <h2 id="h2h-result-title">Result</h2>
+      <p id="h2h-result-subline" class="result-subline"></p>
+      <div id="h2h-result-tiles" class="result-tiles"></div>
+      <div id="h2h-result-def"></div>
+      <div class="modal-actions">
+        <button id="h2h-rematch" class="modal-button" type="button">Rematch</button>
+        <button id="h2h-leave" class="text-button" type="button">Leave</button>
       </div>
     </div>
   </div>
