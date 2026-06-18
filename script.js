@@ -1327,6 +1327,11 @@
       else h.ref.child('players/' + h.myUid + '/connected').set(false).catch(() => {});
     }
     closeModal('h2h-modal');
+    closeModal('h2h-result-modal');
+    $('opponent-panel').hidden = true;
+    $('h2h-rematch').textContent = 'Rematch';
+    // Return to a fresh, playable solo board in the mode they were in.
+    startGame(state.currentMode);
   }
 
   // Filled in by later tasks.
@@ -1382,14 +1387,24 @@
         return; // next snapshot will carry status:'live'
       }
 
-      if (data.status === 'live' && !h.started) {
+      // Re-fires beginRace on a fresh start (initial AND each rematch, which writes a new startAt).
+      if (data.status === 'live' && data.startAt !== h.lastStartAt) {
+        h.lastStartAt = data.startAt;
         h.started = true;
+        h.finished = false;
+        h._oppGone = false;
         beginRace(h, data);
       }
 
       if (data.status === 'live' && h.started) {
-        renderOpponent(h, players[h.oppUid]);
+        const opp = players[h.oppUid];
+        renderOpponent(h, opp);
         maybeResolve(h, data);
+        // Opponent dropped mid-race (their onDisconnect set connected:false) — offer the win.
+        if (opp && opp.connected === false && !opp.solved && !h.finished && !h._oppGone) {
+          h._oppGone = true;
+          offerClaimWin(h);
+        }
       }
 
       if (data.status === 'done' && !h.finished) {
@@ -1417,6 +1432,9 @@
 
   function beginRace(h, data) {
     closeModal('h2h-modal');
+    // Once the race is live, replace any room-removal onDisconnect with a per-player offline flag.
+    h.ref.onDisconnect().cancel();
+    h.ref.child('players/' + h.myUid + '/connected').onDisconnect().set(false);
     h.word = data.word;
     h.wordLength = data.wordLength || CONFIG.DEFAULT_LENGTH;
     loadWordList();              // ensure the guess dictionary is loaded (memoized; the guest needs it)
@@ -1609,6 +1627,8 @@
   function showRaceResult(h, data) {
     h.active = false;
     state.gameActive = false;
+    h._claimMode = false;
+    $('h2h-rematch').textContent = 'Rematch';
     const players = data.players || {};
     const me = players[h.myUid] || {};
     const opp = players[h.oppUid] || {};
@@ -1649,6 +1669,72 @@
     closeModal('h2h-modal');
     openModal('h2h-result-modal');
     if (won) triggerConfetti();
+  }
+
+  // Shown when the opponent disconnects mid-race. Repurposes the result modal's
+  // primary button as "Claim win" via a claim-mode flag (so the single bound
+  // click handler dispatches correctly — no double-binding).
+  function offerClaimWin(h) {
+    h.active = false;
+    h._claimMode = true;
+    $('opp-status').textContent = 'disconnected';
+    $('opp-status').classList.remove('typing');
+    $('h2h-result-title').textContent = 'Opponent left';
+    $('h2h-result-subline').textContent = `${$('opp-name').textContent} disconnected. Claim the win?`;
+    $('h2h-result-tiles').innerHTML = '';
+    $('h2h-result-def').innerHTML = '';
+    $('h2h-rematch').textContent = 'Claim win';
+    closeModal('h2h-modal');
+    openModal('h2h-result-modal');
+  }
+
+  // Single handler bound to the result modal's primary button.
+  function onRematchButton() {
+    const h = state.h2h;
+    if (h && h._claimMode) { claimDisconnectWin(h); return; }
+    rematchRace();
+  }
+
+  function claimDisconnectWin(h) {
+    h._claimMode = false;
+    h.ref.child('winner').transaction((cur) => (cur === null ? h.myUid : undefined))
+      .then(() => h.ref.child('status').set('done')).catch(() => {});
+    // status:'done' will fire showRaceResult, which repaints the modal as a normal win.
+  }
+
+  function rematchRace() {
+    const h = state.h2h;
+    if (!h) { closeModal('h2h-result-modal'); return; }
+    closeModal('h2h-result-modal');
+    h.finished = false;
+    h.started = false;
+    h.active = false;
+    h.guesses = [];
+    h.currentGuess = '';
+    if (h.role === 'host') {
+      loadWordList().then(() => {
+        const word = getRandomWord(CONFIG.DEFAULT_LENGTH);
+        const players = (h.latest && h.latest.players) || {};
+        const reset = {};
+        Object.keys(players).forEach((id) => {
+          reset['players/' + id + '/progress'] = [];
+          reset['players/' + id + '/guesses'] = 0;
+          reset['players/' + id + '/solved'] = false;
+          reset['players/' + id + '/solvedAt'] = null;
+          reset['players/' + id + '/failed'] = false;
+          reset['players/' + id + '/greens'] = 0;
+          reset['players/' + id + '/typing'] = false;
+        });
+        reset.word = word;
+        reset.winner = null;
+        reset.startAt = Date.now() + state.serverOffset + 3500;
+        reset.status = 'live';
+        h.word = word;
+        h.ref.update(reset);
+      });
+    } else {
+      toast('Waiting for a rematch…', 'info');
+    }
   }
 
   // Read-only export so pure helpers can be asserted against in the browser.
@@ -1778,6 +1864,8 @@
     $('open-h2h').addEventListener('click', openH2H);
     $('h2h-create').addEventListener('click', createRace);
     $('h2h-cancel').addEventListener('click', leaveRace);
+    $('h2h-rematch').addEventListener('click', onRematchButton);
+    $('h2h-leave').addEventListener('click', leaveRace);
     $('h2h-copy-code').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(state.h2h ? state.h2h.code : ''); toast('Code copied!', 'success'); }
       catch { toast('Could not copy.', 'error'); }
