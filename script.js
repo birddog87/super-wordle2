@@ -1328,7 +1328,37 @@
   }
 
   // Filled in by later tasks.
-  function joinRace() {}
+  function joinRace(code) {
+    ensureRaceAuth()
+      .then((uid) => requireName().then(() => uid))
+      .then((uid) => {
+        const name = state.playerName || 'Player';
+        const ref = database.ref('races/' + code);
+        return ref.once('value').then((snap) => {
+          const data = snap.val();
+          if (!data) { toast('No race with that code.', 'warn'); return; }
+          if (data.status !== 'waiting') { toast('That race already started.', 'warn'); return; }
+          const players = data.players || {};
+          const ids = Object.keys(players);
+          if (ids.length >= 2 && !players[uid]) { toast('That race is full.', 'warn'); return; }
+          const h = startRaceContext(code, 'guest', uid);
+          h.word = data.word;
+          h.wordLength = data.wordLength || CONFIG.DEFAULT_LENGTH;
+          h.oppUid = ids.find((id) => id !== uid) || null;
+          state.h2h = h;
+          return ref.child('players/' + uid).set(racePlayerSeed(name)).then(() => {
+            ref.child('players/' + uid + '/connected').onDisconnect().set(false);
+            showH2HPane('waiting');
+            $('h2h-code-display').textContent = code;
+            subscribeRace(h);
+          });
+        });
+      })
+      .catch((err) => {
+        console.error('joinRace failed', err);
+        toast('Could not join. Check the code and your connection.', 'error');
+      });
+  }
   function subscribeRace() {}
 
   // Read-only export so pure helpers can be asserted against in the browser.
