@@ -85,6 +85,22 @@ README, not engineered around.
 Widen rules so authenticated (incl. anonymous) users can read/write under
 `races/`. Exact snippet to be documented during implementation.
 
+### Firebase rules (applied)
+
+```json
+{
+  "rules": {
+    "races": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['status'])"
+      }
+    }
+  }
+}
+```
+
 ## UI & screen flow
 
 - **Entry point:** a **"Versus" icon button in the header** (next to

@@ -17,6 +17,7 @@ A polished, offline-friendly Wordle game with three modes, hard mode, local stat
 - Word definitions on win/loss (via [dictionaryapi.dev](https://dictionaryapi.dev/))
 - Confetti, share-to-Twitter/WhatsApp/clipboard
 - Optional Firebase login for the online leaderboard and cross-device sync
+- **Head to Head** — live 1-v-1 race against a friend over a private room code: same word, see their progress as colour blocks, first to solve wins
 - Installable PWA with offline cache
 - Mobile-first: safe-area insets, no tap-zoom delay, responsive tiles down to small phones
 
@@ -39,6 +40,43 @@ npm run deploy
 ```
 
 Publishes the repo root to the `gh-pages` branch.
+
+## Head to Head (live race)
+
+Two players race the same word in real time over a private room code (tap the
+crossed-swords icon → **Create a race** / **Join**). It runs on the existing
+Firebase Realtime Database — no extra services.
+
+### One-time Firebase setup
+
+Head-to-head needs two settings in the [Firebase console](https://console.firebase.google.com/):
+
+1. **Enable Anonymous auth** — Authentication → Sign-in method → **Anonymous** → Enable.
+   (Players get a name-only identity; no account required.)
+2. **Allow access to the `races` node** — Realtime Database → Rules → merge this in
+   alongside your existing `users` / `leaderboard` rules:
+
+   ```json
+   {
+     "rules": {
+       "races": {
+         "$code": {
+           ".read": "auth != null",
+           ".write": "auth != null",
+           ".validate": "newData.hasChildren(['status'])"
+         }
+       }
+     }
+   }
+   ```
+
+### Fair-play note
+
+Because each browser scores its own guesses, the answer for a race is stored in
+the race node and is therefore readable by a determined player via dev tools. This
+is an accepted trade-off for a casual game among friends; a cheat-proof version
+would require a server to evaluate guesses, which this project intentionally does
+not run.
 
 ## Project layout
 
