@@ -17,6 +17,7 @@ A polished, offline-friendly Wordle game with three modes, hard mode, local stat
 - Word definitions on win/loss (via [dictionaryapi.dev](https://dictionaryapi.dev/))
 - Confetti, share-to-Twitter/WhatsApp/clipboard
 - Optional Firebase login for the online leaderboard and cross-device sync
+- **Challenge friends** — async: share a word, everyone races to beat your score on a per-challenge leaderboard
 - **Head to Head** — live 1-v-1 race against a friend over a private room code: same word, see their progress as colour blocks, first to solve wins
 - Installable PWA with offline cache
 - Mobile-first: safe-area insets, no tap-zoom delay, responsive tiles down to small phones
@@ -92,6 +93,40 @@ the race node and is therefore readable by a determined player via dev tools. Th
 is an accepted trade-off for a casual game among friends; a cheat-proof version
 would require a server to evaluate guesses, which this project intentionally does
 not run.
+
+## Async challenges (beat my score)
+
+Finish a Random or 6-Letter game while **signed in** and tap **Challenge friends**
+(also under the crossed-swords icon → **Challenges**). It shares a link
+(`?c=<id>`); anyone who opens it plays the same word, and every result builds a
+per-challenge leaderboard. You get an in-app badge when someone beats you.
+
+Add the `challenges` node to your Realtime Database rules, alongside the existing
+`users` / `leaderboard` / `races`:
+
+```json
+{
+  "rules": {
+    "challenges": {
+      "$id": {
+        ".read": "auth != null",
+        ".write": "auth != null && newData.child('creator/uid').val() === auth.uid && (!data.exists() || data.child('creator/uid').val() === auth.uid)",
+        "attempts": {
+          "$uid": {
+            ".write": "auth != null && $uid === auth.uid && !data.exists()"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Any signed-in user can read a challenge (so friends can fetch it); only the creator
+can write the challenge body; each player may write only their own `attempts/<uid>`
+entry, once. `users/<uid>/myChallenges` and `seen` ride on the existing
+`users/$uid` own-data rule. Same fair-play caveat as head-to-head: the word lives in
+the challenge node, so it's readable via dev tools — fine for a friends game.
 
 ## Project layout
 
