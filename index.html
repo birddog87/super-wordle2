@@ -152,9 +152,9 @@
           <span class="setting-name">Account</span>
           <span id="user-display" class="user-display">Guest</span>
         </div>
-        <p class="setting-desc account-note">Stats are saved on this device. Log in to post scores to the online leaderboard.</p>
+        <p class="setting-desc account-note">Sign in with Google to post scores to the leaderboard and sync across devices. Your stats are saved on this device either way.</p>
         <div class="account-actions">
-          <button id="login-button" type="button">Log in</button>
+          <button id="login-button" type="button">Continue with Google</button>
           <button id="logout-button" type="button" style="display: none;">Log out</button>
           <button id="open-feedback" class="text-button" type="button">Send feedback</button>
         </div>
@@ -256,26 +256,6 @@
         <button id="h2h-rematch" class="modal-button" type="button">Rematch</button>
         <button id="h2h-leave" class="text-button" type="button">Leave</button>
       </div>
-    </div>
-  </div>
-
-  <div id="auth-modal" class="modal" aria-hidden="true">
-    <div class="modal-content" role="dialog" aria-labelledby="auth-modal-title" aria-modal="true">
-      <button class="close" aria-label="Close" type="button">&times;</button>
-      <h2 id="auth-modal-title">Login / Sign Up</h2>
-      <p class="modal-note">Optional. Your stats are saved on this device either way. Log in to post scores to the online leaderboard.</p>
-      <button id="email-signin-button" type="button">Sign in with Email</button>
-      <button id="email-signup-button" type="button">Sign up with Email</button>
-    </div>
-  </div>
-
-  <div id="email-auth-modal" class="modal" aria-hidden="true">
-    <div class="modal-content" role="dialog" aria-labelledby="email-auth-title" aria-modal="true">
-      <button class="close" aria-label="Close" type="button">&times;</button>
-      <h2 id="email-auth-title">Email Authentication</h2>
-      <input type="email" id="user-email" placeholder="Email" autocomplete="email">
-      <input type="password" id="user-password" placeholder="Password (6+ characters)" autocomplete="current-password" minlength="6">
-      <button id="email-auth-submit" class="modal-button" type="button">Continue</button>
     </div>
   </div>
 
