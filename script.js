@@ -1813,6 +1813,7 @@
         database.ref(`users/${user.uid}/profile`).update({ name: state.playerName }).catch(() => {});
         const local = loadStats();
         if (local.gamesPlayed > 0) syncStatsToFirebase(local);
+        checkChallengeNotifications();
       } else if (user && user.isAnonymous) {
         state.userId = user.uid; // has a uid for racing, but not a "real" account
         state.playerName = localStorage.getItem(CONFIG.LS.NAME) || state.playerName || '';
@@ -2011,6 +2012,97 @@
     openModal('challenge-result-modal');
   }
 
+  function openFriends() {
+    openModal('friends-modal');
+  }
+
+  function openChallengesList() {
+    closeModal('friends-modal');
+    openModal('challenges-list-modal');
+    var created = $('challenges-created');
+    $('challenges-played').innerHTML = '<p class="setting-desc">Challenges you play from a link show their leaderboard right after you finish.</p>';
+    if (!isRealUser()) {
+      created.innerHTML = '<p class="modal-note">Sign in with Google to create and track challenges.</p>';
+      return;
+    }
+    created.innerHTML = '<p class="loading">Loading…</p>';
+    var uid = auth.currentUser.uid;
+    database.ref('users/' + uid + '/myChallenges').once('value').then(function (snap) {
+      var ids = snap.val() ? Object.keys(snap.val()) : [];
+      if (!ids.length) { created.innerHTML = '<p class="modal-note">No challenges yet. Finish a Random or 6-Letter game and tap “Challenge friends”.</p>'; $('friends-badge').hidden = true; return; }
+      Promise.all(ids.map(function (id) {
+        return database.ref('challenges/' + id).once('value').then(function (s) { return { id: id, ch: s.val() }; });
+      })).then(function (items) {
+        items = items.filter(function (it) { return it.ch; });
+        items.sort(function (a, b) { return (b.ch.createdAt || 0) - (a.ch.createdAt || 0); });
+        created.innerHTML = '';
+        items.forEach(function (it) { created.appendChild(renderChallengeListRow(it.id, it.ch, uid)); });
+        markChallengesSeen(uid, items);
+      });
+    }).catch(function (e) { console.error('openChallengesList', e); created.innerHTML = '<p>Could not load your challenges.</p>'; });
+  }
+
+  function renderChallengeListRow(id, ch, uid) {
+    var row = document.createElement('div');
+    row.className = 'challenge-row';
+    var rows = challengeRows(ch);
+    var top = rows[0];
+    var nPlayed = ch.attempts ? Object.keys(ch.attempts).length : 0;
+
+    var label = document.createElement('div');
+    label.style.flex = '1';
+    label.style.textAlign = 'left';
+    var word = document.createElement('strong');
+    word.textContent = String(ch.word || '').toUpperCase();
+    var meta = document.createElement('span');
+    meta.className = 'setting-desc';
+    var leader = top ? (' · leader ' + (top.won ? (top.attempts + '/' + CONFIG.MAX_GUESSES) : 'X')) : '';
+    meta.textContent = '  ' + nPlayed + (nPlayed === 1 ? ' attempt' : ' attempts') + leader;
+    label.appendChild(word);
+    label.appendChild(meta);
+    row.appendChild(label);
+
+    var share = document.createElement('button');
+    share.className = 'text-button';
+    share.textContent = 'Share';
+    share.addEventListener('click', function () {
+      shareChallenge(id, ch.creatorResult ? { won: ch.creatorResult.won, attempts: ch.creatorResult.attempts } : {});
+    });
+    row.appendChild(share);
+    return row;
+  }
+
+  // Show the launcher badge if any of my challenges has an opponent result I haven't seen.
+  function checkChallengeNotifications() {
+    if (!isRealUser()) { $('friends-badge').hidden = true; return; }
+    var uid = auth.currentUser.uid;
+    Promise.all([
+      database.ref('users/' + uid + '/myChallenges').once('value'),
+      database.ref('users/' + uid + '/seen').once('value'),
+    ]).then(function (res) {
+      var mine = res[0].val() || {};
+      var seen = res[1].val() || {};
+      var ids = Object.keys(mine);
+      if (!ids.length) { $('friends-badge').hidden = true; return; }
+      Promise.all(ids.map(function (id) {
+        return database.ref('challenges/' + id + '/attempts').once('value').then(function (s) { return { id: id, att: s.val() || {} }; });
+      })).then(function (items) {
+        var hasNew = items.some(function (it) {
+          var seenAt = seen[it.id] || 0;
+          return Object.keys(it.att).some(function (u) { return u !== uid && (it.att[u].at || 0) > seenAt; });
+        });
+        $('friends-badge').hidden = !hasNew;
+      });
+    }).catch(function () {});
+  }
+
+  function markChallengesSeen(uid, items) {
+    var updates = {};
+    items.forEach(function (it) { updates['users/' + uid + '/seen/' + it.id] = firebase.database.ServerValue.TIMESTAMP; });
+    if (Object.keys(updates).length) database.ref().update(updates).catch(function () {});
+    $('friends-badge').hidden = true;
+  }
+
   function bindUI() {
     $('daily-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.DAILY));
     $('random-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.RANDOM));
@@ -2036,7 +2128,9 @@
       closeModal('help-modal');
     });
 
-    $('open-h2h').addEventListener('click', openH2H);
+    $('open-h2h').addEventListener('click', openFriends);
+    $('friends-h2h').addEventListener('click', () => { closeModal('friends-modal'); openH2H(); });
+    $('friends-challenges').addEventListener('click', openChallengesList);
     $('h2h-create').addEventListener('click', createRace);
     $('h2h-cancel').addEventListener('click', leaveRace);
     $('h2h-rematch').addEventListener('click', onRematchButton);
