@@ -53,6 +53,7 @@
     hardMode: false,
     soundOn: true,
     lastResult: null,
+    lastGame: null,
     audioCtx: null,
     popBuffer: null,
     popBytesPromise: null,
@@ -581,6 +582,15 @@
 
   function endGame(won) {
     const attempts = state.guesses.length;
+    // Capture the finished game so it can be turned into a challenge (win or loss).
+    state.lastGame = {
+      mode: state.currentMode,
+      word: state.targetWord,
+      wordLength: state.wordLength,
+      won: won,
+      attempts: attempts,
+      timeMs: Date.now() - state.startTime,
+    };
     const stats = recordGame(won, attempts);
     updateAchievements(stats);
     clearSavedGame();
@@ -865,6 +875,8 @@
       subline.textContent = 'That one got away.';
     }
     renderWordTiles($('result-word-tiles'), state.targetWord, won);
+    // "Challenge friends" is offered for Random/6-Letter results (not the shared Daily).
+    $('challenge-friends-button').style.display = (state.currentMode !== CONFIG.MODES.DAILY) ? '' : 'none';
 
     const isDaily = state.currentMode === CONFIG.MODES.DAILY;
     $('play-again-button').textContent = isDaily ? 'Play Random' : 'Play Again';
@@ -1857,6 +1869,36 @@
     });
   }
 
+  // ---- Challenges (async, Firebase-backed) ----
+
+  // Create a challenge from the game you just finished (Random/6-Letter). Signed-in only.
+  function createChallenge() {
+    if (!isRealUser()) { toast('Sign in with Google to challenge friends.', 'warn'); signInWithGoogle(); return; }
+    const r = state.lastGame;
+    if (!r || r.mode === CONFIG.MODES.DAILY) { toast('Play a Random or 6-Letter game first.', 'warn'); return; }
+    const uid = auth.currentUser.uid;
+    const name = state.playerName || 'Player';
+    const id = genRoomCode();
+    const payload = {
+      word: r.word, wordLength: r.wordLength,
+      creator: { uid: uid, name: sanitize(name) },
+      creatorResult: { won: r.won, attempts: r.attempts, timeMs: r.timeMs },
+      createdAt: firebase.database.ServerValue.TIMESTAMP,
+    };
+    database.ref('challenges/' + id).set(payload)
+      .then(function () { return database.ref('users/' + uid + '/myChallenges/' + id).set(firebase.database.ServerValue.TIMESTAMP); })
+      .then(function () { shareChallenge(id, r); })
+      .catch(function (e) { console.error('createChallenge', e); toast('Could not create the challenge.', 'error'); });
+  }
+
+  function shareChallenge(id, r) {
+    var url = location.origin + location.pathname + '?c=' + id;
+    var verb = r && r.won ? ('solved it in ' + r.attempts) : 'tried it';
+    var text = 'I ' + verb + ' on Wordle — beat me? ' + url;
+    if (navigator.share) navigator.share({ text: text }).catch(function () {});
+    else navigator.clipboard.writeText(text).then(function () { toast('Challenge link copied!', 'success'); }).catch(function () { toast('Could not copy the link.', 'error'); });
+  }
+
   function bindUI() {
     $('daily-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.DAILY));
     $('random-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.RANDOM));
@@ -1923,6 +1965,7 @@
         toast('Could not copy to clipboard.', 'error');
       }
     });
+    $('challenge-friends-button').addEventListener('click', createChallenge);
   }
 
   function maybeShowHelp() {
