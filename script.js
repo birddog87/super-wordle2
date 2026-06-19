@@ -54,6 +54,8 @@
     soundOn: true,
     lastResult: null,
     lastGame: null,
+    challenge: null,
+    inChallenge: false,
     audioCtx: null,
     popBuffer: null,
     popBytesPromise: null,
@@ -581,6 +583,7 @@
   }
 
   function endGame(won) {
+    if (state.inChallenge) { return finishChallenge(won); }
     const attempts = state.guesses.length;
     // Capture the finished game so it can be turned into a challenge (win or loss).
     state.lastGame = {
@@ -1899,6 +1902,115 @@
     else navigator.clipboard.writeText(text).then(function () { toast('Challenge link copied!', 'success'); }).catch(function () { toast('Could not copy the link.', 'error'); });
   }
 
+  function cleanChallengeUrl() {
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  }
+
+  // Open an incoming ?c=<id> challenge: fetch it and show the intro sheet.
+  function openChallenge(id) {
+    database.ref('challenges/' + id).once('value').then(function (snap) {
+      var ch = snap.val();
+      if (!ch) { toast("This challenge isn't available anymore.", 'warn'); cleanChallengeUrl(); return; }
+      state.challenge = { id: id, word: ch.word, wordLength: ch.wordLength, creator: ch.creator, creatorResult: ch.creatorResult, attempts: ch.attempts };
+      var cr = ch.creatorResult || {};
+      var score = cr.won ? (cr.attempts + '/' + CONFIG.MAX_GUESSES) : 'a loss';
+      var who = (ch.creator && ch.creator.name) || 'A friend';
+      $('challenge-intro-text').textContent = who + ' dares you to beat ' + score + ' on this ' + ch.wordLength + '-letter word.';
+      openModal('challenge-intro-modal');
+    }).catch(function (e) { console.error('openChallenge', e); toast('Could not load the challenge.', 'error'); cleanChallengeUrl(); });
+  }
+
+  // Play the challenge word on a normal board (routes the end through finishChallenge).
+  function startChallengeGame() {
+    var ch = state.challenge; if (!ch) return;
+    closeModal('challenge-intro-modal');
+    cleanChallengeUrl();
+    loadWordList().then(function () {
+      state.currentMode = CONFIG.MODES.RANDOM;
+      state.wordLength = ch.wordLength;
+      state.targetWord = ch.word;
+      state.currentGuess = '';
+      state.guesses = [];
+      state.correctPositions = new Array(ch.wordLength).fill(false);
+      state.startTime = Date.now();
+      state.gameActive = true;
+      state.animating = false;
+      state.inChallenge = true;
+      updateModeIndicator(CONFIG.MODES.RANDOM);
+      $('mode-indicator').textContent = 'Challenge · beat their score';
+      createBoard();
+      createKeyboard();
+      updateBoard();
+    });
+  }
+
+  function finishChallenge(won) {
+    var ch = state.challenge;
+    state.inChallenge = false;
+    state.gameActive = false;
+    var attempts = state.guesses.length;
+    var timeMs = Date.now() - state.startTime;
+    recordGame(won, attempts); // playing still counts toward local stats
+    ensureRaceAuth()
+      .then(function (uid) { return requireName().then(function () { return uid; }); })
+      .then(function (uid) {
+        var me = { name: sanitize(state.playerName || 'Player'), won: won, attempts: attempts, timeMs: timeMs, at: firebase.database.ServerValue.TIMESTAMP };
+        // write-once: don't overwrite an earlier attempt by the same player
+        return database.ref('challenges/' + ch.id + '/attempts/' + uid).transaction(function (cur) { return cur === null ? me : undefined; })
+          .then(function () { return database.ref('challenges/' + ch.id).once('value'); })
+          .then(function (snap) { showChallengeResult(snap.val() || ch, won, uid); });
+      })
+      .catch(function (e) { console.error('finishChallenge', e); showChallengeResult(ch, won, null); });
+  }
+
+  // Build the ranked rows (creator + all attempts): solved > fewer guesses > faster.
+  function challengeRows(ch) {
+    var rows = [];
+    if (ch.creator && ch.creatorResult) {
+      rows.push({ uid: ch.creator.uid, name: ch.creator.name, won: !!ch.creatorResult.won, attempts: ch.creatorResult.attempts, timeMs: ch.creatorResult.timeMs });
+    }
+    var att = ch.attempts || {};
+    Object.keys(att).forEach(function (uid) {
+      var a = att[uid];
+      rows.push({ uid: uid, name: a.name, won: !!a.won, attempts: a.attempts, timeMs: a.timeMs });
+    });
+    rows.sort(function (a, b) {
+      if (a.won !== b.won) return a.won ? -1 : 1;
+      if (a.won && b.won && a.attempts !== b.attempts) return a.attempts - b.attempts;
+      return (a.timeMs || 0) - (b.timeMs || 0);
+    });
+    return rows;
+  }
+
+  function renderChallengeLeaderboard(rows, myUid) {
+    var medals = ['🥇', '🥈', '🥉'];
+    var html = '<table><thead><tr><th>#</th><th>Player</th><th>Guesses</th><th>Time</th></tr></thead><tbody>';
+    rows.forEach(function (r, i) {
+      var rank = r.won ? (medals[i] || (i + 1)) : '—';
+      var cls = r.uid && r.uid === myUid ? ' class="me"' : '';
+      var guesses = r.won ? (r.attempts + '/' + CONFIG.MAX_GUESSES) : 'X';
+      var time = r.timeMs ? (Math.round(r.timeMs / 1000) + 's') : '—';
+      // names are sanitize()-encoded on write, so they are safe to inject here
+      html += '<tr' + cls + '><td class="rank-medal">' + rank + '</td><td>' + (r.name || 'Player') + '</td><td>' + guesses + '</td><td>' + time + '</td></tr>';
+    });
+    return html + '</tbody></table>';
+  }
+
+  function showChallengeResult(ch, won, myUid) {
+    state.inChallenge = false;
+    var rows = challengeRows(ch);
+    var myRank = -1;
+    for (var i = 0; i < rows.length; i++) { if (rows[i].uid && rows[i].uid === myUid) { myRank = i + 1; break; } }
+    $('challenge-result-title').textContent = won ? 'You solved it!' : 'Out of guesses';
+    $('challenge-result-sub').textContent = won
+      ? ('Solved in ' + state.guesses.length + (myRank > 0 ? (' · rank #' + myRank + ' of ' + rows.length) : ''))
+      : ('The word was ' + String(ch.word || state.targetWord || '').toUpperCase());
+    renderWordTiles($('challenge-result-tiles'), ch.word || state.targetWord, won);
+    $('challenge-leaderboard').innerHTML = renderChallengeLeaderboard(rows, myUid);
+    closeModal('challenge-intro-modal');
+    openModal('challenge-result-modal');
+  }
+
   function bindUI() {
     $('daily-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.DAILY));
     $('random-mode-button').addEventListener('click', () => startGame(CONFIG.MODES.RANDOM));
@@ -1966,6 +2078,13 @@
       }
     });
     $('challenge-friends-button').addEventListener('click', createChallenge);
+    $('challenge-intro-play').addEventListener('click', startChallengeGame);
+    $('challenge-newword').addEventListener('click', () => { closeModal('challenge-result-modal'); startGame(CONFIG.MODES.RANDOM); });
+    $('challenge-back').addEventListener('click', () => {
+      closeModal('challenge-result-modal');
+      toast('Solve one, then tap Challenge friends to hit back.', 'info');
+      startGame(CONFIG.MODES.RANDOM);
+    });
   }
 
   function maybeShowHelp() {
@@ -1991,6 +2110,8 @@
     );
 
     loadWordList().then(() => {
+      const cid = new URLSearchParams(location.search).get('c');
+      if (cid) { startGame(CONFIG.MODES.RANDOM); openChallenge(cid); return; }
       if (!resumeGame()) startGame(CONFIG.MODES.DAILY);
     }).catch(() => {});
 
