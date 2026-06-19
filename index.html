@@ -40,6 +40,7 @@
         </button>
         <button id="open-h2h" class="icon-button" type="button" aria-label="Head to head" title="Head to head">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14.5 3.5l6 6M3.5 14.5l6 6"/><path d="M18 2l4 4-9 9-4-4z" transform="translate(-7 1)"/><path d="M2 18l4 4 9-9-4-4z"/><path d="M14 7l3 3M7 14l3 3"/></svg>
+          <span id="friends-badge" class="friends-badge" hidden></span>
         </button>
       </div>
     </header>
@@ -189,6 +190,51 @@
     </div>
   </div>
 
+  <div id="friends-modal" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-labelledby="friends-modal-title" aria-modal="true">
+      <button class="close" aria-label="Close" type="button">&times;</button>
+      <h2 id="friends-modal-title">Play with friends</h2>
+      <div class="friends-choices">
+        <button id="friends-h2h" class="modal-button" type="button">Head to Head <span class="friends-sub">live race</span></button>
+        <button id="friends-challenges" class="text-button" type="button">Challenges <span class="friends-sub">async · beat my score</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="challenge-intro-modal" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-labelledby="challenge-intro-title" aria-modal="true">
+      <button class="close" aria-label="Close" type="button">&times;</button>
+      <h2 id="challenge-intro-title">You've been challenged</h2>
+      <p id="challenge-intro-text" class="modal-note"></p>
+      <button id="challenge-intro-play" class="modal-button" type="button">Play this word</button>
+    </div>
+  </div>
+
+  <div id="challenge-result-modal" class="modal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-labelledby="challenge-result-title" aria-modal="true">
+      <button class="close" aria-label="Close" type="button">&times;</button>
+      <h2 id="challenge-result-title">Challenge result</h2>
+      <p id="challenge-result-sub" class="result-subline"></p>
+      <div id="challenge-result-tiles" class="result-tiles"></div>
+      <div id="challenge-leaderboard"></div>
+      <div class="modal-actions">
+        <button id="challenge-back" class="modal-button" type="button">Challenge back</button>
+        <button id="challenge-newword" class="text-button" type="button">Play your own</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="challenges-list-modal" class="modal" aria-hidden="true">
+    <div class="modal-content modal-wide" role="dialog" aria-labelledby="challenges-list-title" aria-modal="true">
+      <button class="close" aria-label="Close" type="button">&times;</button>
+      <h2 id="challenges-list-title">Your challenges</h2>
+      <h3 class="section-label">Created by you</h3>
+      <div id="challenges-created"></div>
+      <h3 class="section-label">Played</h3>
+      <div id="challenges-played"></div>
+    </div>
+  </div>
+
   <div id="h2h-modal" class="modal" aria-hidden="true">
     <div class="modal-content" role="dialog" aria-labelledby="h2h-modal-title" aria-modal="true">
       <button class="close" aria-label="Close" type="button">&times;</button>
@@ -238,6 +284,7 @@
         <button id="play-again-button" class="modal-button" type="button">Play Again</button>
       </div>
       <div class="share-buttons">
+        <button id="challenge-friends-button" type="button">Challenge friends</button>
         <button id="copy-result-button" type="button">Copy result</button>
         <button id="share-whatsapp-button" type="button">WhatsApp</button>
         <button id="share-button" type="button">X</button>
