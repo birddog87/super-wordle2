@@ -1152,3 +1152,104 @@ td { font-variant-numeric: tabular-nums; }
 @media (min-width: 1600px) and (min-height: 1350px) { :root { --ui-scale: 1.7; } }
 @media (min-width: 2200px) and (min-height: 1750px) { :root { --ui-scale: 2.1; } }
 @media (min-width: 3000px) and (min-height: 2050px) { :root { --ui-scale: 2.6; } }
+
+/* ---- Challenges ---- */
+
+/* Unread-results dot on the H2H/friends launcher.
+   .icon-button isn't positioned, so anchor the header button itself. */
+#open-h2h { position: relative; }
+.friends-badge {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  /* thin ring so it reads over the icon glyph */
+  box-shadow: 0 0 0 2px var(--bg-deep);
+  pointer-events: none;
+  animation: friends-badge-pulse 2s var(--ease-out-quart) infinite;
+}
+/* We set display via animation/box; keep the [hidden] attribute working. */
+.friends-badge[hidden] { display: none; }
+
+@keyframes friends-badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--bg-deep), 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 2px var(--bg-deep), 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
+/* Chooser: two tall, full-width, centred choices stacked vertically. */
+.friends-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.friends-choices .modal-button,
+.friends-choices .text-button {
+  width: 100%;
+  padding: 14px !important;
+  text-align: center;
+}
+.friends-sub {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--fg-muted);
+  margin-top: 2px;
+}
+
+/* Challenge leaderboard — mirrors the existing .tabcontent table look.
+   The global `table` rule already gives full width, td padding, hairline
+   row separators and tabular-nums; these add the "me" highlight + medal. */
+#challenge-leaderboard table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 0.92rem;
+}
+#challenge-leaderboard th,
+#challenge-leaderboard td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+#challenge-leaderboard th {
+  font-weight: 700;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-faint);
+}
+#challenge-leaderboard td { font-variant-numeric: tabular-nums; }
+#challenge-leaderboard tr.me {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+#challenge-leaderboard tr.me td { font-weight: 700; color: var(--fg); }
+#challenge-leaderboard .rank-medal {
+  font-weight: 700;
+  color: var(--present);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A single row in the created/played challenge lists. */
+.challenge-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Unseen-result marker on a challenge row. */
+.new-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .friends-badge { animation: none; }
+}
