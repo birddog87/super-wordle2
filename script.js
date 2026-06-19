@@ -584,7 +584,7 @@
     const stats = recordGame(won, attempts);
     updateAchievements(stats);
     clearSavedGame();
-    if (state.userId) {
+    if (isRealUser()) {
       writeLeaderboard(won, attempts);
       syncStatsToFirebase(stats);
     }
@@ -783,7 +783,7 @@
   }
 
   function syncStatsToFirebase(stats) {
-    if (!state.userId) return;
+    if (!isRealUser()) return;
     database.ref(`users/${state.userId}/stats`).update({
       gamesPlayed: stats.gamesPlayed,
       gamesWon: stats.gamesWon,
@@ -1007,8 +1007,8 @@
     const userDisplay = $('user-display');
     const loginBtn = $('login-button');
     const logoutBtn = $('logout-button');
-    if (state.userId) {
-      userDisplay.textContent = state.playerName || 'Player';
+    if (isRealUser()) {
+      userDisplay.textContent = `Signed in as ${state.playerName || 'Player'}`;
       logoutBtn.style.display = 'inline-block';
       loginBtn.style.display = 'none';
     } else {
@@ -1140,7 +1140,7 @@
     check('fiveStreak', (stats.currentStreak || 0) >= 5, 'Hot Streak');
     check('tenStreak', (stats.maxStreak || 0) >= 10, 'Unstoppable');
     localStorage.setItem(CONFIG.LS.ACH, JSON.stringify(ach));
-    if (state.userId) database.ref(`users/${state.userId}/achievements`).update(ach).catch(() => {});
+    if (isRealUser()) database.ref(`users/${state.userId}/achievements`).update(ach).catch(() => {});
     newly.forEach((n) => toast(`Achievement unlocked: ${n}!`, 'success', 3500));
   }
 
@@ -1750,17 +1750,53 @@
   Object.assign(window.__WU_TEST__, { genRoomCode, encodeEval, decodeEval, greenCount, CODE_ALPHABET });
 
   // ---- Auth UI ----
+  function isRealUser() {
+    return !!(auth.currentUser && !auth.currentUser.isAnonymous);
+  }
+
+  function googleProvider() {
+    return new firebase.auth.GoogleAuthProvider();
+  }
+
+  // Sign in with Google. If currently anonymous, upgrade the account in place
+  // (same uid). Falls back to redirect when the popup is blocked (PWA standalone).
+  function signInWithGoogle() {
+    const provider = googleProvider();
+    const user = auth.currentUser;
+    const handle = (err) => {
+      if (!err) return;
+      if (err.code === 'auth/credential-already-in-use' && err.credential) {
+        auth.signInWithCredential(err.credential).catch((e) => toast(friendlyAuthError(e), 'error', 4000));
+        return;
+      }
+      if (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment') {
+        (user && user.isAnonymous ? user.linkWithRedirect(provider) : auth.signInWithRedirect(provider))
+          .catch((e) => toast(friendlyAuthError(e), 'error', 4000));
+        return;
+      }
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') return; // silent
+      toast(friendlyAuthError(err), 'error', 4000);
+      console.error('Google sign-in error:', err);
+    };
+    if (user && user.isAnonymous) {
+      user.linkWithPopup(provider).catch(handle);
+    } else {
+      auth.signInWithPopup(provider).catch(handle);
+    }
+  }
+
   function bindAuthUI() {
     auth.onAuthStateChanged((user) => {
-      if (user) {
+      if (user && !user.isAnonymous) {
         state.userId = user.uid;
-        const name = user.displayName || (user.email ? user.email.split('@')[0] : 'Player');
-        state.playerName = state.playerName || name;
+        state.playerName = user.displayName || state.playerName || localStorage.getItem(CONFIG.LS.NAME) || 'Player';
         localStorage.setItem(CONFIG.LS.NAME, state.playerName);
-        closeModal('auth-modal');
-        closeModal('email-auth-modal');
+        database.ref(`users/${user.uid}/profile`).update({ name: state.playerName });
         const local = loadStats();
         if (local.gamesPlayed > 0) syncStatsToFirebase(local);
+      } else if (user && user.isAnonymous) {
+        state.userId = user.uid; // has a uid for racing, but not a "real" account
+        state.playerName = localStorage.getItem(CONFIG.LS.NAME) || state.playerName || '';
       } else {
         state.userId = null;
         state.playerName = localStorage.getItem(CONFIG.LS.NAME) || '';
@@ -1768,39 +1804,13 @@
       updateUserDisplay();
     });
 
-    $('login-button').addEventListener('click', () => openModal('auth-modal'));
-    $('email-signin-button').addEventListener('click', () => {
-      closeModal('auth-modal');
-      $('email-auth-modal').dataset.intent = 'signin';
-      $('email-auth-title').textContent = 'Sign In';
-      openModal('email-auth-modal');
-    });
-    $('email-signup-button').addEventListener('click', () => {
-      closeModal('auth-modal');
-      $('email-auth-modal').dataset.intent = 'signup';
-      $('email-auth-title').textContent = 'Sign Up';
-      openModal('email-auth-modal');
-    });
-    $('email-auth-submit').addEventListener('click', () => {
-      const email = $('user-email').value.trim();
-      const password = $('user-password').value;
-      if (!email || !password) {
-        toast('Email and password required.', 'warn');
-        return;
+    auth.getRedirectResult().catch((err) => {
+      if (err && err.code === 'auth/credential-already-in-use' && err.credential) {
+        auth.signInWithCredential(err.credential).catch(() => {});
       }
-      if (password.length < 6) {
-        toast('Password must be at least 6 characters.', 'warn');
-        return;
-      }
-      const intent = $('email-auth-modal').dataset.intent || 'signin';
-      const fn = intent === 'signup' ? auth.createUserWithEmailAndPassword : auth.signInWithEmailAndPassword;
-      fn.call(auth, email, password)
-        .then(() => { $('user-email').value = ''; $('user-password').value = ''; })
-        .catch((err) => {
-          toast(friendlyAuthError(err), 'error', 4000);
-          console.error('Auth error:', err);
-        });
     });
+
+    $('login-button').addEventListener('click', signInWithGoogle);
     $('logout-button').addEventListener('click', () => {
       auth.signOut().catch((err) => console.error('Logout failed:', err));
     });
@@ -1808,13 +1818,12 @@
 
   function friendlyAuthError(err) {
     switch (err && err.code) {
-      case 'auth/invalid-email': return 'Invalid email address.';
-      case 'auth/user-not-found': return 'No account with that email.';
-      case 'auth/wrong-password': return 'Wrong password.';
-      case 'auth/email-already-in-use': return 'That email is already registered.';
-      case 'auth/weak-password': return 'Password is too weak.';
+      case 'auth/popup-blocked': return 'Popup blocked — retrying with a redirect.';
       case 'auth/network-request-failed': return 'Network error. Check your connection.';
-      default: return 'Authentication failed. Please try again.';
+      case 'auth/credential-already-in-use': return 'That Google account is already in use.';
+      case 'auth/account-exists-with-different-credential': return 'An account already exists for that email.';
+      case 'auth/operation-not-allowed': return 'Google sign-in is not enabled for this project.';
+      default: return 'Sign-in failed. Please try again.';
     }
   }
 
