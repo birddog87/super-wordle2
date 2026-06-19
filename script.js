@@ -1713,7 +1713,11 @@
   function rematchRace() {
     const h = state.h2h;
     if (!h) { closeModal('h2h-result-modal'); return; }
+    // Bypass the result-modal close guard: this is a programmatic close to start a
+    // new round, NOT a user dismissal that should tear the race down.
+    state._leavingRace = true;
     closeModal('h2h-result-modal');
+    state._leavingRace = false;
     h.finished = false;
     h.started = false;
     h.active = false;
