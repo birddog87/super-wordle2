@@ -1791,7 +1791,7 @@
         state.userId = user.uid;
         state.playerName = user.displayName || state.playerName || localStorage.getItem(CONFIG.LS.NAME) || 'Player';
         localStorage.setItem(CONFIG.LS.NAME, state.playerName);
-        database.ref(`users/${user.uid}/profile`).update({ name: state.playerName });
+        database.ref(`users/${user.uid}/profile`).update({ name: state.playerName }).catch(() => {});
         const local = loadStats();
         if (local.gamesPlayed > 0) syncStatsToFirebase(local);
       } else if (user && user.isAnonymous) {
