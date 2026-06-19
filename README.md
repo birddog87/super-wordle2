@@ -70,6 +70,21 @@ Head-to-head needs two settings in the [Firebase console](https://console.fireba
    }
    ```
 
+### Accounts (Google sign-in)
+
+Signing in is optional — stats are saved on-device either way. Sign-in uses
+**Google** (the old email/password flow was removed) and is also what an anonymous
+racer upgrades to. Two one-time console settings:
+
+1. **Enable Google** — Authentication → Sign-in method → **Google** → Enable (pick a
+   support email).
+2. **Authorized domains** — Authentication → Settings → Authorized domains: confirm
+   `localhost` is present and add **`birddog87.github.io`** (the GitHub Pages domain)
+   so sign-in works in production.
+
+Signing in posts scores to the leaderboard and syncs stats across devices; an
+anonymous racer who signs in is upgraded in place (same identity, stats kept).
+
 ### Fair-play note
 
 Because each browser scores its own guesses, the answer for a race is stored in
