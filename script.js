@@ -56,6 +56,7 @@
     lastGame: null,
     challenge: null,
     inChallenge: false,
+    challengePending: false,
     audioCtx: null,
     popBuffer: null,
     popBytesPromise: null,
@@ -201,6 +202,11 @@
       leaveRace();
       state._leavingRace = false;
       return;
+    }
+    // Dismissing a challenge intro without playing → fall back to a normal game.
+    if (m.id === 'challenge-intro-modal' && state.challengePending) {
+      state.challengePending = false;
+      setTimeout(failChallengeOpen, 0);
     }
     if (m.querySelector('.countdown-time')) stopCountdown();
     if (reduceMotion()) {
@@ -1909,21 +1915,34 @@
 
   // Open an incoming ?c=<id> challenge: fetch it and show the intro sheet.
   function openChallenge(id) {
-    database.ref('challenges/' + id).once('value').then(function (snap) {
-      var ch = snap.val();
-      if (!ch) { toast("This challenge isn't available anymore.", 'warn'); cleanChallengeUrl(); return; }
-      state.challenge = { id: id, word: ch.word, wordLength: ch.wordLength, creator: ch.creator, creatorResult: ch.creatorResult, attempts: ch.attempts };
-      var cr = ch.creatorResult || {};
-      var score = cr.won ? (cr.attempts + '/' + CONFIG.MAX_GUESSES) : 'a loss';
-      var who = (ch.creator && ch.creator.name) || 'A friend';
-      $('challenge-intro-text').textContent = who + ' dares you to beat ' + score + ' on this ' + ch.wordLength + '-letter word.';
-      openModal('challenge-intro-modal');
-    }).catch(function (e) { console.error('openChallenge', e); toast('Could not load the challenge.', 'error'); cleanChallengeUrl(); });
+    state.challengePending = true;
+    // Reading a challenge requires auth (rules), so sign in (anonymously) FIRST.
+    ensureRaceAuth()
+      .then(function () { return database.ref('challenges/' + id).once('value'); })
+      .then(function (snap) {
+        var ch = snap.val();
+        if (!ch) { toast("This challenge isn't available anymore.", 'warn'); failChallengeOpen(); return; }
+        state.challenge = { id: id, word: ch.word, wordLength: ch.wordLength, creator: ch.creator, creatorResult: ch.creatorResult, attempts: ch.attempts };
+        var cr = ch.creatorResult || {};
+        var score = cr.won ? (cr.attempts + '/' + CONFIG.MAX_GUESSES) : 'a loss';
+        var who = (ch.creator && ch.creator.name) || 'A friend';
+        $('challenge-intro-text').textContent = who + ' dares you to beat ' + score + ' on this ' + ch.wordLength + '-letter word.';
+        openModal('challenge-intro-modal');
+      })
+      .catch(function (e) { console.error('openChallenge', e); toast('Could not load the challenge.', 'error'); failChallengeOpen(); });
+  }
+
+  // Couldn't open the challenge (missing/denied/dismissed): fall back to a normal game.
+  function failChallengeOpen() {
+    state.challengePending = false;
+    cleanChallengeUrl();
+    if (!state.gameActive && !state.inChallenge) { if (!resumeGame()) startGame(CONFIG.MODES.DAILY); }
   }
 
   // Play the challenge word on a normal board (routes the end through finishChallenge).
   function startChallengeGame() {
     var ch = state.challenge; if (!ch) return;
+    state.challengePending = false;
     closeModal('challenge-intro-modal');
     cleanChallengeUrl();
     loadWordList().then(function () {
@@ -2205,7 +2224,7 @@
 
     loadWordList().then(() => {
       const cid = new URLSearchParams(location.search).get('c');
-      if (cid) { startGame(CONFIG.MODES.RANDOM); openChallenge(cid); return; }
+      if (cid) { openChallenge(cid); return; }
       if (!resumeGame()) startGame(CONFIG.MODES.DAILY);
     }).catch(() => {});
 
