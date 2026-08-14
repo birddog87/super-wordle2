@@ -11,7 +11,13 @@
     TOAST_MS: 2500,
     DAILY_EPOCH: new Date(2022, 0, 1).getTime(),
     RECENT_MAX: 100,
-    BUILD: '2026-08-13b',
+    BUILD: '2026-08-13c',
+    JABS: ['too slow 🐌', 'nice try', 'any day now', '🔥', 'gg', '👀'],
+    CHAT_LIMIT: 40,
+    CHAT_COOLDOWN_MS: 1500,
+    CHAT_MAX_LEN: 120,
+    BUBBLE_MS: 2500,
+    BUBBLE_MAX: 3,
     OPP_GRACE_MS: 20000,          // how long an opponent may be off-screen before we call it
     RACE_STALE_MS: 60 * 60 * 1000, // a waiting room nobody joined is retired after this
     MODES: { DAILY: 'daily', RANDOM: 'random', SIX: 'six-letter' },
@@ -1276,6 +1282,161 @@
     return (code.match(/2/g) || []).length;
   }
 
+  // ---- Smack talk ----
+  // A jab and a typed message are the same record; `kind` only decides how it
+  // is drawn. Letters of the answer never go near this node.
+
+  function sendChat(text, kind) {
+    const h = state.h2h;
+    if (!h) return;
+    const clean = String(text || '').trim().slice(0, CONFIG.CHAT_MAX_LEN);
+    if (!clean) return;
+    const now = Date.now();
+    if (now - (h._lastChatAt || 0) < CONFIG.CHAT_COOLDOWN_MS) return;
+    h._lastChatAt = now;
+    setChatCooldown(true);
+    setTimeout(() => setChatCooldown(false), CONFIG.CHAT_COOLDOWN_MS);
+    h.ref.child('chat').push({
+      uid: h.myUid,
+      name: sanitizeName(state.playerName),
+      text: clean,
+      kind: kind || 'said',
+      at: firebase.database.ServerValue.TIMESTAMP,
+    }).catch(() => {});
+  }
+
+  function sanitizeName(name) {
+    return String(name || 'Player').trim().slice(0, 24) || 'Player';
+  }
+
+  function setChatCooldown(cooling) {
+    const send = $('chat-send');
+    if (send) send.disabled = cooling;
+    $$('#jab-popover .jab').forEach((b) => { b.disabled = cooling; });
+  }
+
+  // Firebase replays every existing child through child_added on attach, and it
+  // always does so before the matching value event. That one-shot value is the
+  // exact boundary between "history" and "new", so rejoining a race refills the
+  // thread without twenty stale bubbles flying across the board.
+  function watchChat(h) {
+    if (h._chatRef) return;
+    h._chatPrimed = false;
+    h._chatRef = h.ref.child('chat').limitToLast(CONFIG.CHAT_LIMIT);
+    h._chatRef.once('value').then(() => { h._chatPrimed = true; }).catch(() => { h._chatPrimed = true; });
+    h._chatHandler = (snap) => {
+      const m = snap.val();
+      if (!m || !m.text) return;
+      appendChatLine(h, m);
+      if (!h._chatPrimed || m.uid === h.myUid) return;
+      floatBubble(m);
+      if (!chatPanelShowing()) setChatUnread(true);
+    };
+    h._chatRef.on('child_added', h._chatHandler);
+  }
+
+  function unwatchChat(h) {
+    if (h && h._chatRef) { h._chatRef.off('child_added', h._chatHandler); h._chatRef = null; }
+    const log = $('chat-log');
+    if (log) log.innerHTML = '';
+    const bubbles = $('chat-bubbles');
+    if (bubbles) bubbles.innerHTML = '';
+    const panel = $('chat-panel');
+    if (panel) panel.hidden = true;
+    showJabs(false);
+    setChatUnread(false);
+  }
+
+  function appendChatLine(h, m) {
+    const log = $('chat-log');
+    if (!log) return;
+    const mine = m.uid === h.myUid;
+    const line = document.createElement('p');
+    line.className = 'chat-line' + (mine ? ' mine' : '');
+    const who = document.createElement('span');
+    who.className = 'chat-who';
+    who.textContent = (mine ? 'You' : (m.name || 'Them')) + ': ';
+    line.appendChild(who);
+    line.appendChild(document.createTextNode(m.text));   // never innerHTML
+    log.appendChild(line);
+    while (log.children.length > CONFIG.CHAT_LIMIT) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function floatBubble(m) {
+    const host = $('chat-bubbles');
+    if (!host) return;
+    const b = document.createElement('div');
+    b.className = 'chat-bubble';
+    b.textContent = m.text;
+    host.appendChild(b);
+    while (host.children.length > CONFIG.BUBBLE_MAX) host.removeChild(host.firstChild);
+    setTimeout(() => {
+      b.classList.add('leaving');
+      setTimeout(() => b.remove(), reduceMotion() ? 0 : 260);
+    }, CONFIG.BUBBLE_MS);
+  }
+
+  const chatPanelShowing = () => { const p = $('chat-panel'); return !!p && !p.hidden && !!p.offsetParent; };
+
+  // One thread element, moved to wherever there is room to type.
+  function mountChat(where) {
+    const panel = $('chat-panel');
+    const mount = $(where === 'result' ? 'chat-mount-result' : 'chat-mount-waiting');
+    if (!panel || !mount) return;
+    if (panel.parentNode !== mount) mount.appendChild(panel);
+    panel.hidden = !state.h2h;
+    if (panel.hidden) return;
+    setChatUnread(false);
+    const log = $('chat-log');
+    if (log) log.scrollTop = log.scrollHeight;
+  }
+
+  function setChatUnread(on) {
+    const dot = $('chat-dot');
+    if (dot) dot.hidden = !on;
+  }
+
+  function showJabs(open) {
+    const pop = $('jab-popover');
+    const toggle = $('chat-toggle');
+    if (!pop || !toggle) return;
+    const show = open === undefined ? pop.hidden : open;
+    pop.hidden = !show;
+    toggle.setAttribute('aria-expanded', String(show));
+    if (show) setChatUnread(false);
+  }
+
+  function buildJabs() {
+    const pop = $('jab-popover');
+    if (!pop || pop.children.length) return;
+    CONFIG.JABS.forEach((text) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'jab';
+      b.textContent = text;
+      b.addEventListener('click', () => { sendChat(text, 'jab'); showJabs(false); });
+      pop.appendChild(b);
+    });
+  }
+
+  function bindChatUI() {
+    buildJabs();
+    $('chat-toggle').addEventListener('click', () => showJabs());
+    $('chat-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = $('chat-input');
+      sendChat(input.value, 'said');
+      input.value = '';
+    });
+    document.addEventListener('click', (e) => {
+      const pop = $('jab-popover');
+      if (!pop || pop.hidden) return;
+      if (!pop.contains(e.target) && e.target !== $('chat-toggle') && !$('chat-toggle').contains(e.target)) showJabs(false);
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') showJabs(false); });
+  }
+
   // A phone can restart the page while you are off in the share sheet. The room
   // is still on the server, so remember enough to walk back into it.
   function saveRace(h) {
@@ -1358,6 +1519,8 @@
   function showH2HPane(which) {
     $('h2h-home').hidden = which !== 'home';
     $('h2h-waiting').hidden = which !== 'waiting';
+    if (which === 'waiting') mountChat('waiting');
+    else { const p = $('chat-panel'); if (p) p.hidden = true; }
   }
 
   // Ensure we have a display name; prompt for one if needed. Resolves with the name.
@@ -1486,6 +1649,7 @@
     if (h._bound) return;
     h._bound = true;
     watchRacePresence(h);
+    watchChat(h);
     // Capture the server clock offset once for synced timing.
     database.ref('.info/serverTimeOffset').once('value').then((s) => { state.serverOffset = s.val() || 0; });
 
@@ -1590,6 +1754,7 @@
     if (!h) return;
     if (h.handler) h.ref.off('value', h.handler);
     if (h._connRef) { h._connRef.off('value', h._connHandler); h._connRef = null; }
+    unwatchChat(h);
     clearOppTimer(h);
     h.ref.onDisconnect().cancel();
     clearSavedRace();
@@ -1606,6 +1771,8 @@
     state._leavingRace = false;
     $('h2h-rematch').disabled = false;
     $('h2h-rematch').textContent = 'Rematch';
+    const chat = $('chat-panel');
+    if (chat) chat.hidden = true;   // back to the board; jabs only from here
     h.word = data.word;
     h.wordLength = data.wordLength || CONFIG.DEFAULT_LENGTH;
     loadWordList();              // ensure the guess dictionary is loaded (memoized; the guest needs it)
@@ -1841,6 +2008,7 @@
       })
       .catch(() => { def.innerHTML = '<em class="def-loading">Definition not available.</em>'; });
 
+    mountChat('result');
     closeModal('h2h-modal');
     openModal('h2h-result-modal');
     if (won) triggerConfetti();
@@ -1861,6 +2029,7 @@
     $('h2h-result-def').innerHTML = '';
     $('h2h-rematch').disabled = false;
     $('h2h-rematch').textContent = 'Claim win';
+    mountChat('result');
     closeModal('h2h-modal');
     openModal('h2h-result-modal');
   }
@@ -2365,6 +2534,7 @@
     bindAuthUI();
     bindModalCloseUI();
     bindPhysicalKeyboard();
+    bindChatUI();
     bindSettings();
     bindUI();
     displayStatistics();

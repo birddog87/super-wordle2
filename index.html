@@ -54,11 +54,15 @@
 
     <main role="main">
       <div id="opponent-panel" class="opponent-panel" hidden aria-live="polite">
+        <div id="chat-bubbles" class="chat-bubbles" aria-live="polite" aria-atomic="false"></div>
         <div class="opp-head">
           <span id="opp-name" class="opp-name">Opponent</span>
           <span id="opp-status" class="opp-status">guess 0/6</span>
+          <button id="chat-toggle" class="chat-toggle" type="button" aria-label="Smack talk"
+                  aria-expanded="false" aria-controls="jab-popover">💬<span id="chat-dot" class="chat-dot" hidden></span></button>
         </div>
         <div id="opp-grid" class="opp-grid" aria-label="Opponent progress"></div>
+        <div id="jab-popover" class="jab-popover" hidden aria-label="Quick jabs"></div>
       </div>
       <div id="game-board" aria-label="Game board"></div>
       <div id="keyboard" aria-label="On-screen keyboard"></div>
@@ -259,6 +263,7 @@
           <button id="h2h-copy-code" type="button">Copy code</button>
         </div>
         <p class="h2h-wait-status"><span class="h2h-pulse"></span> Waiting for opponent…</p>
+        <div id="chat-mount-waiting"></div>
         <button id="h2h-cancel" class="text-button" type="button">Cancel</button>
       </div>
     </div>
@@ -300,11 +305,22 @@
       <p id="h2h-result-subline" class="result-subline"></p>
       <div id="h2h-result-tiles" class="result-tiles"></div>
       <div id="h2h-result-def"></div>
+      <div id="chat-mount-result"></div>
       <div class="modal-actions">
         <button id="h2h-rematch" class="modal-button" type="button">Rematch</button>
         <button id="h2h-leave" class="text-button" type="button">Leave</button>
       </div>
     </div>
+  </div>
+
+  <!-- One thread, moved between the lobby mount and the result mount. -->
+  <div id="chat-panel" class="chat-panel" hidden>
+    <div id="chat-log" class="chat-log" role="log" aria-live="polite" aria-label="Race chat"></div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" type="text" maxlength="120" placeholder="Say something…"
+             autocomplete="off" enterkeyhint="send" aria-label="Message">
+      <button id="chat-send" class="text-button" type="submit">Send</button>
+    </form>
   </div>
 
   <div id="achievements-modal" class="modal" aria-hidden="true">

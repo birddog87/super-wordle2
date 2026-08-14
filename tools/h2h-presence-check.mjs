@@ -416,6 +416,129 @@ async function s12_serviceWorkerStillWorks(browser) {
   await ctx.close();
 }
 
+
+// --- smack talk --------------------------------------------------------------
+
+const JAB = 'too slow \u{1F40C}';
+
+const chatLog = (page) => page.textContent('#chat-log');
+const bubbles = (page) => page.evaluate(() =>
+  [...document.querySelectorAll('#chat-bubbles .chat-bubble')].map((b) => b.textContent));
+const chatCount = (page, code) => page.evaluate(async (c) => {
+  const s2 = await window.firebase.database().ref('races/' + c + '/chat').once('value');
+  return Object.keys(s2.val() || {}).length;
+}, code);
+
+async function sendJab(page, nth = 1) {
+  const alreadyOpen = await page.evaluate(() => !document.getElementById('jab-popover').hidden);
+  if (!alreadyOpen) await page.click('#chat-toggle');
+  await page.waitForSelector('#jab-popover:not([hidden])');
+  await page.click(`#jab-popover .jab:nth-child(${nth})`);
+}
+
+async function s13_jabMidRace(browser) {
+  console.log('\n=== 13: a jab lands on the other board mid-race ===');
+  const { host, guest, code } = await startedRace(browser);
+  console.log(`  room ${code}`);
+  await sendJab(host);
+  await sleep(2000);
+
+  check('jab floats on the opponent\'s board', (await bubbles(guest)).includes(JAB),
+        JSON.stringify(await bubbles(guest)));
+  check('sender does not get their own bubble', (await bubbles(host)).length === 0);
+  check('both threads record it', (await chatLog(host)).includes(JAB) && (await chatLog(guest)).includes(JAB));
+  check('opponent gets an unread dot',
+        await guest.evaluate(() => !document.getElementById('chat-dot').hidden));
+  // isVisible checks computed style, not just the property — a `display` rule on
+  // the element silently defeats the hidden attribute.
+  check('the jab popover closed itself', !(await host.isVisible('#jab-popover')));
+  check('the opponent never sees a popover they did not open',
+        !(await guest.isVisible('#jab-popover')));
+  check('typing still works with chat on screen', await canType(host, 'a'));
+
+  await sleep(2000);
+  check('bubble clears itself', (await bubbles(guest)).length === 0);
+
+  await dropRoom(host, code);
+  await host.context().close(); await guest.context().close();
+}
+
+async function s14_typedChatOnResult(browser) {
+  console.log('\n=== 14: typing on the result screen ===');
+  const { host, guest, code } = await startedRace(browser);
+  console.log(`  room ${code}`);
+  const word = (await readRoom(host, code)).word;
+  await host.keyboard.type(word);
+  await host.keyboard.press('Enter');
+  await host.waitForSelector('#h2h-result-modal.open', { timeout: 20000 });
+  await guest.waitForSelector('#h2h-result-modal.open', { timeout: 20000 });
+
+  check('the thread is on the result screen',
+        await host.evaluate(() => !document.getElementById('chat-panel').hidden &&
+          document.getElementById('chat-panel').parentNode.id === 'chat-mount-result'));
+
+  await host.fill('#chat-input', 'ur going down');
+  await host.click('#chat-send');
+  await sleep(2500);
+  check('message reaches the opponent', (await chatLog(guest)).includes('ur going down'));
+  check('opponent sees who said it', (await chatLog(guest)).includes('HOST:'));
+  check('sender sees it as theirs', (await chatLog(host)).includes('You:'));
+  check('input cleared after sending',
+        (await host.inputValue('#chat-input')) === '');
+
+  await dropRoom(host, code);
+  await host.context().close(); await guest.context().close();
+}
+
+async function s15_chatSurvivesRestart(browser) {
+  console.log('\n=== 15: chat history survives a restart, without replaying bubbles ===');
+  const { host, guest, code } = await startedRace(browser);
+  console.log(`  room ${code}`);
+  await sendJab(guest);
+  await sleep(2000);
+  await sendJab(guest, 2);
+  await sleep(4000);
+
+  await host.reload({ waitUntil: 'domcontentloaded' });
+  await host.waitForFunction(() => !!window.firebase && !!document.getElementById('open-h2h'));
+  await sleep(9000);
+
+  const log = await chatLog(host);
+  check('history comes back after the restart', log.includes(JAB) && log.includes('nice try'), log.trim());
+  check('no stale bubbles fly past on rejoin', (await bubbles(host)).length === 0,
+        JSON.stringify(await bubbles(host)));
+  check('still racing after the restart',
+        await host.evaluate(() => !document.getElementById('opponent-panel').hidden));
+
+  await dropRoom(host, code);
+  await host.context().close(); await guest.context().close();
+}
+
+async function s16_cooldown(browser) {
+  console.log('\n=== 16: the cooldown stops jab spam ===');
+  const { host, guest, code } = await startedRace(browser);
+  console.log(`  room ${code}`);
+  await sendJab(host, 1);
+  await host.click('#chat-toggle');
+  await sleep(150);
+  const disabled = await host.evaluate(() =>
+    [...document.querySelectorAll('#jab-popover .jab')].every((b) => b.disabled));
+  check('jabs disable themselves while cooling', disabled);
+  await host.evaluate(() => document.querySelector('#jab-popover .jab:nth-child(2)').click());
+  await sleep(2500);
+  check('only one message got through', (await chatCount(host, code)) === 1,
+        `${await chatCount(host, code)} messages`);
+
+  await sleep(1500);
+  await sendJab(host, 2);
+  await sleep(2000);
+  check('jabs work again once the cooldown passes', (await chatCount(host, code)) === 2,
+        `${await chatCount(host, code)} messages`);
+
+  await dropRoom(host, code);
+  await host.context().close(); await guest.context().close();
+}
+
 const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
 const run = (n, fn) => (ONLY.length && !ONLY.includes(String(n))) ? Promise.resolve() : fn(browser);
 
@@ -433,6 +556,10 @@ try {
   await run(10, s10_hostRematchFreesTheGuest);
   await run(11, s11_guestRematchKeepsAWayOut);
   await run(12, s12_serviceWorkerStillWorks);
+  await run(13, s13_jabMidRace);
+  await run(14, s14_typedChatOnResult);
+  await run(15, s15_chatSurvivesRestart);
+  await run(16, s16_cooldown);
 } finally {
   await browser.close();
 }

@@ -1253,3 +1253,135 @@ td { font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) {
   .friends-badge { animation: none; }
 }
+
+
+/* ---- Head-to-head smack talk ---------------------------------------------
+   The jab popover and the incoming bubbles are both absolutely positioned off
+   the opponent card, so neither takes vertical space away from the board —
+   --tile-max is computed from the viewport height and would shrink. */
+.opponent-panel { position: relative; }
+
+.chat-toggle {
+  position: relative;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.chat-toggle:hover { color: var(--fg); }
+
+.chat-dot {
+  position: absolute;
+  top: -1px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ember);
+}
+
+/* `display` on the element beats the UA sheet's [hidden] { display: none }, so
+   the attribute has to be honoured explicitly or the popover is always painted. */
+.jab-popover[hidden],
+.chat-panel[hidden] { display: none; }
+
+.jab-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 6px;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 8px;
+  background: var(--surface-high);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-key);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.45);
+  animation: rise 0.18s var(--ease-out-expo) backwards;
+}
+
+.jab {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-key);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.jab:hover:not(:disabled) { background: var(--bg-deep); }
+.jab:disabled { opacity: 0.45; cursor: default; }
+
+.chat-bubbles {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.chat-bubble {
+  max-width: 92%;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-high);
+  color: var(--fg);
+  font-size: 0.82rem;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.4);
+  animation: bubble-in 0.28s var(--ease-out-expo) backwards;
+}
+.chat-bubble.leaving { animation: bubble-out 0.24s var(--ease-out-quart) forwards; }
+
+@keyframes bubble-in { from { opacity: 0; transform: translateY(6px) scale(0.96); } }
+@keyframes bubble-out { to { opacity: 0; transform: translateY(-6px); } }
+
+.chat-panel { margin-top: 14px; text-align: left; }
+
+.chat-log {
+  height: 116px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-key);
+  background: var(--bg-deep);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.chat-log:empty::before { content: 'Say something…'; color: var(--fg-faint); }
+
+.chat-line { margin: 0 0 4px; color: var(--fg-muted); overflow-wrap: anywhere; }
+.chat-line.mine { color: var(--fg); }
+.chat-who { color: var(--fg-faint); }
+.chat-line.mine .chat-who { color: var(--accent); }
+
+.chat-form { display: flex; gap: 6px; margin-top: 8px; }
+.chat-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-key);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+}
+.chat-form input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-form button:disabled { opacity: 0.45; cursor: default; }
+
+@media (prefers-reduced-motion: reduce) {
+  .jab-popover,
+  .chat-bubble,
+  .chat-bubble.leaving { animation: none; }
+}
