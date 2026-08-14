@@ -1,4 +1,5 @@
-const CACHE_NAME = 'wordle-upgrade-cache-v15';
+const CACHE_NAME = 'wordle-upgrade-cache-v16';
+const SHELL = /\.(?:html|js|css)$/;
 const ASSETS = [
   './',
   'index.html',
@@ -38,6 +39,22 @@ self.addEventListener('fetch', (event) => {
       url.hostname.includes('firebaseio.com') ||
       url.hostname.includes('googleapis.com') ||
       url.hostname.includes('gstatic.com')) {
+    return;
+  }
+
+  // The app shell goes to the network first so a deploy lands on the very next
+  // load instead of a load later — serving a stale script.js to half a live race
+  // is worse than a few hundred ms. The cache still covers going offline.
+  if (req.mode === 'navigate' || (url.origin === self.location.origin && SHELL.test(url.pathname))) {
+    event.respondWith(
+      fetch(req).then((res) => {
+        if (res && res.ok && url.origin === self.location.origin) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(req, clone));
+        }
+        return res;
+      }).catch(() => caches.match(req).then((cached) => cached || caches.match('index.html')))
+    );
     return;
   }
 

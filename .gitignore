@@ -25,3 +25,6 @@ yarn-error.log*
 
 # git worktrees
 .worktrees/
+
+# vercel cli link
+.vercel

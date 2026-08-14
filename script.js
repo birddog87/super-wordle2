@@ -11,6 +11,7 @@
     TOAST_MS: 2500,
     DAILY_EPOCH: new Date(2022, 0, 1).getTime(),
     RECENT_MAX: 100,
+    BUILD: '2026-08-13b',
     OPP_GRACE_MS: 20000,          // how long an opponent may be off-screen before we call it
     RACE_STALE_MS: 60 * 60 * 1000, // a waiting room nobody joined is retired after this
     MODES: { DAILY: 'daily', RANDOM: 'random', SIX: 'six-letter' },
@@ -18,7 +19,7 @@
       STATS: 'wu_stats', ACH: 'wu_ach', HARD: 'wu_hard', SOUND: 'wu_sound',
       CONTRAST: 'wu_contrast', GAME: 'wu_game', RECENT: 'wu_recent',
       NAME: 'playerName', DAILY_DONE: 'dailyAttempted', LAST_DAILY: 'lastDailyWord',
-      SEEN_HELP: 'wu_seen_help',
+      SEEN_HELP: 'wu_seen_help', RACE: 'wu_race',
     },
     FIREBASE: {
       apiKey: 'AIzaSyApXW3PWhqhQ0mXeIG1oo5mdawQD29Xxjs',
@@ -1275,6 +1276,79 @@
     return (code.match(/2/g) || []).length;
   }
 
+  // A phone can restart the page while you are off in the share sheet. The room
+  // is still on the server, so remember enough to walk back into it.
+  function saveRace(h) {
+    if (!h || !h.code) return;
+    try {
+      localStorage.setItem(CONFIG.LS.RACE, JSON.stringify({
+        code: h.code, role: h.role, uid: h.myUid,
+        guesses: state.guesses.slice(), at: Date.now(),
+      }));
+    } catch {}
+  }
+
+  function clearSavedRace() {
+    try { localStorage.removeItem(CONFIG.LS.RACE); } catch {}
+  }
+
+  // Resolve once Firebase has restored (or failed to restore) the signed-in user.
+  // Asking auth.currentUser too early mints a fresh anonymous uid, which would
+  // lose our seat in the room we are trying to rejoin.
+  function authReady() {
+    return new Promise((resolve) => {
+      const off = auth.onAuthStateChanged((user) => { off(); resolve(user); });
+    });
+  }
+
+  function resumeRace() {
+    const saved = readJSON(CONFIG.LS.RACE, null);
+    if (!saved || !saved.code || !saved.uid) return;
+    if (Date.now() - (saved.at || 0) > CONFIG.RACE_STALE_MS) { clearSavedRace(); return; }
+    authReady().then((user) => {
+      if (!user || user.uid !== saved.uid || state.h2h) return;
+      return database.ref('races/' + saved.code).once('value').then((snap) => {
+        const data = snap.val();
+        const players = (data && data.players) || {};
+        if (!data || data.status === 'done' || !players[saved.uid]) { clearSavedRace(); return; }
+        const h = startRaceContext(saved.code, saved.role, saved.uid);
+        h.word = data.word;
+        h.wordLength = data.wordLength || CONFIG.DEFAULT_LENGTH;
+        h.oppUid = Object.keys(players).find((id) => id !== saved.uid) || null;
+        h._resumeGuesses = Array.isArray(saved.guesses) ? saved.guesses : [];
+        state.h2h = h;
+        subscribeRace(h);
+        if (data.status === 'waiting') {
+          $('h2h-code-display').textContent = saved.code;
+          showH2HPane('waiting');
+          openModal('h2h-modal');
+          toast('Back in your race.', 'info');
+        }
+      });
+    }).catch(() => {});
+  }
+
+  // Rebuild the board after a restart. Only this device knows which letters were
+  // typed — the room only ever stored the colours.
+  function restoreRaceGuesses(h, saved) {
+    const rows = (saved || [])
+      .filter((g) => typeof g === 'string' && g.length === h.wordLength)
+      .slice(0, CONFIG.MAX_GUESSES);
+    if (!rows.length) return;
+    state.targetWord = h.word;          // renderResumedGuesses paints from this
+    state.guesses = rows.slice();
+    h.guesses = rows.map((g) => encodeEval(evaluateGuess(g, h.word)));
+    renderResumedGuesses();
+    // Re-publish so the opponent's mirror matches the board we just rebuilt.
+    h.ref.child('players/' + h.myUid).update({
+      progress: h.guesses,
+      guesses: h.guesses.length,
+      typing: false,
+      greens: greenCount(h.guesses[h.guesses.length - 1] || ''),
+    }).catch(() => {});
+    toast('Picked your race back up.', 'info');
+  }
+
   function openH2H() {
     showH2HPane('home');
     $('h2h-code-input').value = '';
@@ -1337,6 +1411,7 @@
           $('h2h-code-display').textContent = code;
           showH2HPane('waiting');
           subscribeRace(h);
+          saveRace(h);
         });
       })
       .catch((err) => {
@@ -1398,6 +1473,7 @@
             showH2HPane('waiting');
             $('h2h-code-display').textContent = code;
             subscribeRace(h);
+            saveRace(h);
           });
         });
       })
@@ -1516,11 +1592,20 @@
     if (h._connRef) { h._connRef.off('value', h._connHandler); h._connRef = null; }
     clearOppTimer(h);
     h.ref.onDisconnect().cancel();
+    clearSavedRace();
     state.h2h = null;
   }
 
   function beginRace(h, data) {
+    // Programmatic closes, not user dismissals that should tear the race down.
+    // The result modal is still up on whichever player did not press Rematch,
+    // and a modal on screen swallows every keystroke.
+    state._leavingRace = true;
     closeModal('h2h-modal');
+    closeModal('h2h-result-modal');
+    state._leavingRace = false;
+    $('h2h-rematch').disabled = false;
+    $('h2h-rematch').textContent = 'Rematch';
     h.word = data.word;
     h.wordLength = data.wordLength || CONFIG.DEFAULT_LENGTH;
     loadWordList();              // ensure the guess dictionary is loaded (memoized; the guest needs it)
@@ -1534,12 +1619,14 @@
     createBoard();
     createKeyboard();
     updateBoard();
+    if (h._resumeGuesses) { restoreRaceGuesses(h, h._resumeGuesses); h._resumeGuesses = null; }
+    saveRace(h);
     $('opponent-panel').hidden = false;
     setOpponentName(h);
     renderOpponent(h, (data.players || {})[h.oppUid]);
     $('mode-indicator').textContent = 'Head to Head · race';
     runCountdown(data.startAt, () => {
-      h.active = true;
+      h.active = state.guesses.length < CONFIG.MAX_GUESSES;
       h.startTime = Date.now();
       const cd = $('h2h-countdown');
       cd.hidden = true;
@@ -1640,6 +1727,7 @@
         typing: false,
         greens: greenCount(code),
       }).catch(() => {});
+      saveRace(h);
 
       if (won) {
         h.active = false;
@@ -1714,6 +1802,7 @@
     h.active = false;
     state.gameActive = false;
     h._claimMode = false;
+    $('h2h-rematch').disabled = false;
     $('h2h-rematch').textContent = 'Rematch';
     const players = data.players || {};
     const me = players[h.myUid] || {};
@@ -1770,6 +1859,7 @@
     $('h2h-result-subline').textContent = `${$('opp-name').textContent} disconnected. Claim the win?`;
     $('h2h-result-tiles').innerHTML = '';
     $('h2h-result-def').innerHTML = '';
+    $('h2h-rematch').disabled = false;
     $('h2h-rematch').textContent = 'Claim win';
     closeModal('h2h-modal');
     openModal('h2h-result-modal');
@@ -1792,17 +1882,17 @@
   function rematchRace() {
     const h = state.h2h;
     if (!h) { closeModal('h2h-result-modal'); return; }
-    // Bypass the result-modal close guard: this is a programmatic close to start a
-    // new round, NOT a user dismissal that should tear the race down.
-    state._leavingRace = true;
-    closeModal('h2h-result-modal');
-    state._leavingRace = false;
     h.finished = false;
     h.started = false;
     h.active = false;
     h.guesses = [];
     h.currentGuess = '';
     if (h.role === 'host') {
+      // Bypass the result-modal close guard: a programmatic close to start a new
+      // round, NOT a user dismissal that should tear the race down.
+      state._leavingRace = true;
+      closeModal('h2h-result-modal');
+      state._leavingRace = false;
       loadWordList().then(() => {
         const word = getRandomWord(CONFIG.DEFAULT_LENGTH);
         const players = (h.latest && h.latest.players) || {};
@@ -1824,7 +1914,11 @@
         h.ref.update(reset);
       });
     } else {
-      toast('Waiting for a rematch…', 'info');
+      // Only the host deals the next word. Keep the result modal up — it is the
+      // guest's only way out — instead of dropping them onto a dead board.
+      $('h2h-rematch').textContent = 'Waiting…';
+      $('h2h-rematch').disabled = true;
+      toast('Waiting for the host to start the rematch…', 'info');
     }
   }
 
@@ -2266,6 +2360,8 @@
 
   function init() {
     applySettings();
+    window.__WU_BUILD__ = CONFIG.BUILD;
+    if ($('build-stamp')) $('build-stamp').textContent = CONFIG.BUILD;
     bindAuthUI();
     bindModalCloseUI();
     bindPhysicalKeyboard();
@@ -2284,6 +2380,7 @@
       const cid = new URLSearchParams(location.search).get('c');
       if (cid) { openChallenge(cid); return; }
       if (!resumeGame()) startGame(CONFIG.MODES.DAILY);
+      resumeRace();   // an interrupted race takes the board back over if it is still live
     }).catch(() => {});
 
     if ('serviceWorker' in navigator) {

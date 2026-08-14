@@ -263,15 +263,176 @@ async function s7_ordinaryRaceStillFinishes(browser) {
   await host.context().close(); await guest.context().close();
 }
 
+
+// --- restart / rematch -------------------------------------------------------
+
+const canType = async (page, letters) => {
+  await page.keyboard.type(letters);
+  await sleep(400);
+  return page.evaluate(() => {
+    const t = document.querySelector('#game-board .tile');
+    return !!(t && t.textContent.trim());
+  });
+};
+
+// A wrong-but-valid guess, so the race does not end.
+const decoyGuess = (word) => (word === 'crane' ? 'slate' : 'crane');
+
+async function s8_restartWhileWaiting(browser) {
+  console.log('\n=== 8: the phone restarts the page while the host is waiting ===');
+  const host = await newPlayer(browser, 'HOST');
+  const probe = await newPlayer(browser, 'PROBE');
+  const code = await hostCreatesRace(host);
+  console.log(`  room ${code}`);
+
+  await host.reload({ waitUntil: 'domcontentloaded' });
+  await host.waitForFunction(() => !!window.firebase && !!document.getElementById('open-h2h'));
+  await sleep(6000);
+
+  check('room is still on the server after the restart', !!(await readRoom(probe, code)));
+  const back = await host.evaluate(() => ({
+    modal: document.getElementById('h2h-modal').classList.contains('open'),
+    waiting: !document.getElementById('h2h-waiting').hidden,
+    code: document.getElementById('h2h-code-display').textContent.trim(),
+  }));
+  check('host lands back in the lobby with the same code', back.modal && back.waiting && back.code === code,
+        JSON.stringify(back));
+
+  // and the code still works for the friend it was shared with
+  const guest = await newPlayer(browser, 'GUEST');
+  await guestJoins(guest, code);
+  await host.waitForFunction(() => !document.getElementById('opponent-panel').hidden, null, { timeout: 25000 }).catch(() => {});
+  check('the shared code still starts a race',
+        await host.evaluate(() => !document.getElementById('opponent-panel').hidden));
+
+  await dropRoom(probe, code);
+  await host.context().close(); await probe.context().close(); await guest.context().close();
+}
+
+async function s9_restartMidRace(browser) {
+  console.log('\n=== 9: the phone restarts the page mid-race ===');
+  const { host, guest, code } = await startedRace(browser);
+  console.log(`  room ${code}`);
+  const word = (await readRoom(host, code)).word;
+  const typed = decoyGuess(word);
+  await host.keyboard.type(typed);
+  await host.keyboard.press('Enter');
+  await sleep(3000);
+
+  await host.reload({ waitUntil: 'domcontentloaded' });
+  await host.waitForFunction(() => !!window.firebase && !!document.getElementById('open-h2h'));
+  await sleep(8000);
+
+  const row0 = await host.evaluate(() => {
+    const r = document.querySelector('#game-board .board-row');
+    if (!r) return null;
+    return {
+      letters: [...r.children].map((t) => t.textContent.trim()).join('').toLowerCase(),
+      painted: [...r.children].every((t) => /correct|present|absent/.test(t.className)),
+    };
+  });
+  check('board comes back with the letters that were typed',
+        !!row0 && row0.letters === typed && row0.painted, JSON.stringify(row0));
+  check('still in the race after the restart',
+        await host.evaluate(() => !document.getElementById('opponent-panel').hidden));
+  check('can keep playing after the restart', await canType(host, 'q'));
+  const mirrored = await guest.evaluate(async (c) => {
+    const s2 = await window.firebase.database().ref('races/' + c + '/players').once('value');
+    return Object.values(s2.val() || {}).map((p) => (p.progress || []).length);
+  }, code);
+  check('opponent still sees one completed row', mirrored.includes(1), JSON.stringify(mirrored));
+
+  await dropRoom(host, code);
+  await host.context().close(); await guest.context().close();
+}
+
+async function s10_hostRematchFreesTheGuest(browser) {
+  console.log('\n=== 10: host hits Rematch while the guest is still on the result screen ===');
+  const { host, guest, code } = await startedRace(browser);
+  console.log(`  room ${code}`);
+  const word = (await readRoom(host, code)).word;
+  await host.keyboard.type(word);
+  await host.keyboard.press('Enter');
+  await host.waitForSelector('#h2h-result-modal.open', { timeout: 20000 });
+  await guest.waitForSelector('#h2h-result-modal.open', { timeout: 20000 });
+
+  await host.click('#h2h-rematch');           // the guest never touches theirs
+  await sleep(8000);
+  check('guest\'s result modal gets out of the way',
+        await guest.evaluate(() => !document.getElementById('h2h-result-modal').classList.contains('open')));
+  check('guest can type in the new round', await canType(guest, 'a'));
+  check('guest is still in the race', await guest.evaluate(() => !!window.document
+        .getElementById('opponent-panel') && !document.getElementById('opponent-panel').hidden));
+
+  await dropRoom(host, code);
+  await host.context().close(); await guest.context().close();
+}
+
+async function s11_guestRematchKeepsAWayOut(browser) {
+  console.log('\n=== 11: guest hits Rematch first ===');
+  const { host, guest, code } = await startedRace(browser);
+  console.log(`  room ${code}`);
+  const word = (await readRoom(host, code)).word;
+  await host.keyboard.type(word);
+  await host.keyboard.press('Enter');
+  await guest.waitForSelector('#h2h-result-modal.open', { timeout: 20000 });
+
+  await guest.click('#h2h-rematch');
+  await sleep(2000);
+  const waiting = await guest.evaluate(() => ({
+    open: document.getElementById('h2h-result-modal').classList.contains('open'),
+    label: document.getElementById('h2h-rematch').textContent.trim(),
+    disabled: document.getElementById('h2h-rematch').disabled,
+  }));
+  check('guest keeps a modal they can leave from', waiting.open && waiting.disabled, JSON.stringify(waiting));
+
+  await host.click('#h2h-rematch');
+  await sleep(8000);
+  check('host\'s rematch releases the waiting guest',
+        await guest.evaluate(() => !document.getElementById('h2h-result-modal').classList.contains('open')));
+  check('guest can type once the rematch starts', await canType(guest, 'a'));
+
+  await dropRoom(host, code);
+  await host.context().close(); await guest.context().close();
+}
+
+async function s12_serviceWorkerStillWorks(browser) {
+  console.log('\n=== 12: the service worker still installs and serves ===');
+  const ctx = await browser.newContext();          // service workers NOT blocked here
+  const errors = [];
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(BASE, { waitUntil: 'load' });
+  await page.waitForFunction(() => navigator.serviceWorker && navigator.serviceWorker.ready, null, { timeout: 20000 }).catch(() => {});
+  await sleep(4000);
+  await page.reload({ waitUntil: 'load' });
+  await sleep(3000);
+  check('page runs clean with the service worker active', errors.length === 0, errors.join(' | '));
+  check('controlled by a service worker after a reload',
+        await page.evaluate(() => !!navigator.serviceWorker.controller));
+  check('the running build is the one we shipped',
+        !!(await page.evaluate(() => window.__WU_BUILD__)),
+        String(await page.evaluate(() => window.__WU_BUILD__)));
+  await ctx.close();
+}
+
+const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
+const run = (n, fn) => (ONLY.length && !ONLY.includes(String(n))) ? Promise.resolve() : fn(browser);
+
 const browser = await chromium.launch();
 try {
-  await s1_shareWhileWaiting(browser);
-  await s2_backgroundMidRace(browser);
-  await s3_realDeparture(browser);
-  await s4_returnsBeforeClaim(browser);
-  await s5_cancelStillCleansUp(browser);
-  await s6_staleRoomRetired(browser);
-  await s7_ordinaryRaceStillFinishes(browser);
+  await run(1, s1_shareWhileWaiting);
+  await run(2, s2_backgroundMidRace);
+  await run(3, s3_realDeparture);
+  await run(4, s4_returnsBeforeClaim);
+  await run(5, s5_cancelStillCleansUp);
+  await run(6, s6_staleRoomRetired);
+  await run(7, s7_ordinaryRaceStillFinishes);
+  await run(8, s8_restartWhileWaiting);
+  await run(9, s9_restartMidRace);
+  await run(10, s10_hostRematchFreesTheGuest);
+  await run(11, s11_guestRematchKeepsAWayOut);
+  await run(12, s12_serviceWorkerStillWorks);
 } finally {
   await browser.close();
 }
