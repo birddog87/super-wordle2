@@ -11,6 +11,8 @@
     TOAST_MS: 2500,
     DAILY_EPOCH: new Date(2022, 0, 1).getTime(),
     RECENT_MAX: 100,
+    OPP_GRACE_MS: 20000,          // how long an opponent may be off-screen before we call it
+    RACE_STALE_MS: 60 * 60 * 1000, // a waiting room nobody joined is retired after this
     MODES: { DAILY: 'daily', RANDOM: 'random', SIX: 'six-letter' },
     LS: {
       STATS: 'wu_stats', ACH: 'wu_ach', HARD: 'wu_hard', SOUND: 'wu_sound',
@@ -1327,8 +1329,11 @@
           players: { [uid]: racePlayerSeed(name) },
         };
         return h.ref.set(payload).then(() => {
-          // Remove an abandoned room if the host disconnects while still waiting.
-          h.ref.onDisconnect().remove();
+          // The room deliberately survives a dropped socket. Phones close the
+          // connection every time the page is hidden — which is exactly what
+          // tapping Share does — so a disconnect must not delete the room out
+          // from under the code we just handed to a friend. Rooms nobody joins
+          // are retired by age in joinRace instead.
           $('h2h-code-display').textContent = code;
           showH2HPane('waiting');
           subscribeRace(h);
@@ -1363,7 +1368,13 @@
     startGame(state.currentMode);
   }
 
-  // Filled in by later tasks.
+  // A waiting room outlives a host who wandered off, so treat old ones as gone.
+  function staleRoom(data) {
+    const created = data.createdAt || 0;
+    if (!created) return false;
+    return (Date.now() + (state.serverOffset || 0)) - created > CONFIG.RACE_STALE_MS;
+  }
+
   function joinRace(code) {
     ensureRaceAuth()
       .then((uid) => requireName().then(() => uid))
@@ -1374,6 +1385,7 @@
           const data = snap.val();
           if (!data) { toast('No race with that code.', 'warn'); return; }
           if (data.status !== 'waiting') { toast('That race already started.', 'warn'); return; }
+          if (staleRoom(data)) { ref.remove().catch(() => {}); toast('No race with that code.', 'warn'); return; }
           const players = data.players || {};
           const ids = Object.keys(players);
           if (ids.length >= 2 && !players[uid]) { toast('That race is full.', 'warn'); return; }
@@ -1383,7 +1395,6 @@
           h.oppUid = ids.find((id) => id !== uid) || null;
           state.h2h = h;
           return ref.child('players/' + uid).set(racePlayerSeed(name)).then(() => {
-            ref.child('players/' + uid + '/connected').onDisconnect().set(false);
             showH2HPane('waiting');
             $('h2h-code-display').textContent = code;
             subscribeRace(h);
@@ -1398,6 +1409,7 @@
   function subscribeRace(h) {
     if (h._bound) return;
     h._bound = true;
+    watchRacePresence(h);
     // Capture the server clock offset once for synced timing.
     database.ref('.info/serverTimeOffset').once('value').then((s) => { state.serverOffset = s.val() || 0; });
 
@@ -1422,6 +1434,7 @@
         h.started = true;
         h.finished = false;
         h._oppGone = false;
+        clearOppTimer(h);
         beginRace(h, data);
       }
 
@@ -1429,11 +1442,7 @@
         const opp = players[h.oppUid];
         renderOpponent(h, opp);
         maybeResolve(h, data);
-        // Opponent dropped mid-race (their onDisconnect set connected:false) — offer the win.
-        if (opp && opp.connected === false && !opp.solved && !h.finished && !h._oppGone) {
-          h._oppGone = true;
-          offerClaimWin(h);
-        }
+        trackOpponentPresence(h, opp);
       }
 
       if (data.status === 'done' && !h.finished) {
@@ -1445,6 +1454,7 @@
   }
 
   function onRaceVanished(h) {
+    h._vanished = true;          // stop the presence watcher recreating a stub room
     // The room was torn down before it started.
     if (h.finished || h.started) return;
     toast('The race was cancelled.', 'warn');
@@ -1452,18 +1462,65 @@
     showH2HPane('home');
   }
 
+  // Firebase discards a queued onDisconnect once it fires, and a phone fires one
+  // every time the page is hidden. So re-arm it on every reconnect and re-assert
+  // that we are here — otherwise a single glance at another app leaves a player
+  // flagged offline for the rest of the race.
+  function watchRacePresence(h) {
+    if (h._connRef) return;
+    h._connRef = database.ref('.info/connected');
+    h._connHandler = (snap) => {
+      if (snap.val() !== true || state.h2h !== h || h._vanished) return;
+      const mine = h.ref.child('players/' + h.myUid + '/connected');
+      mine.onDisconnect().set(false);
+      mine.set(true).catch(() => {});
+    };
+    h._connRef.on('value', h._connHandler);
+  }
+
+  function clearOppTimer(h) {
+    if (h._oppTimer) { clearTimeout(h._oppTimer); h._oppTimer = null; }
+  }
+
+  // A dropped socket is not the same as a player quitting. Give them a grace
+  // window to come back, and take the offer back if they make it.
+  function trackOpponentPresence(h, opp) {
+    const away = !!opp && opp.connected === false && !opp.solved;
+    if (away && !h.finished) {
+      if (h._oppTimer || h._oppGone) return;
+      $('opp-status').textContent = 'reconnecting…';
+      $('opp-status').classList.remove('typing');
+      h._oppTimer = setTimeout(() => {
+        h._oppTimer = null;
+        if (!h.finished && !h._oppGone) { h._oppGone = true; offerClaimWin(h); }
+      }, CONFIG.OPP_GRACE_MS);
+      return;
+    }
+    clearOppTimer(h);
+    if (h._oppGone && h._claimMode && !h.finished) {
+      // They got back before the win was claimed — put the race back.
+      h._oppGone = false;
+      h._claimMode = false;
+      h.active = h._activeBeforeDrop !== false;
+      state._leavingRace = true;   // programmatic close, not a user dismissal
+      closeModal('h2h-result-modal');
+      state._leavingRace = false;
+      $('h2h-rematch').textContent = 'Rematch';
+      toast('Opponent reconnected.', 'info');
+    }
+  }
+
   function teardownRace(h) {
     if (!h) return;
     if (h.handler) h.ref.off('value', h.handler);
+    if (h._connRef) { h._connRef.off('value', h._connHandler); h._connRef = null; }
+    clearOppTimer(h);
     h.ref.onDisconnect().cancel();
     state.h2h = null;
   }
 
   function beginRace(h, data) {
     closeModal('h2h-modal');
-    // Once the race is live, replace any room-removal onDisconnect with a per-player offline flag.
-    h.ref.onDisconnect().cancel();
-    h.ref.child('players/' + h.myUid + '/connected').onDisconnect().set(false);
     h.word = data.word;
     h.wordLength = data.wordLength || CONFIG.DEFAULT_LENGTH;
     loadWordList();              // ensure the guess dictionary is loaded (memoized; the guest needs it)
@@ -1704,6 +1761,7 @@
   // primary button as "Claim win" via a claim-mode flag (so the single bound
   // click handler dispatches correctly — no double-binding).
   function offerClaimWin(h) {
+    h._activeBeforeDrop = h.active;
     h.active = false;
     h._claimMode = true;
     $('opp-status').textContent = 'disconnected';
